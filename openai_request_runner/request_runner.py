@@ -1,5 +1,6 @@
 #from https://github.com/openai/openai-cookbook/blob/main/examples/api_request_parallel_processor.py
 from abc import abstractmethod
+from ast import Call
 import aiohttp  # for making API calls concurrently
 import argparse  # for running script from command line
 import asyncio  # for running API calls concurrently
@@ -12,7 +13,9 @@ import time  # for sleeping after rate limit is hit
 from dataclasses import dataclass, field  # for storing API inputs, outputs, and metadata
 import openai
 from openai.openai_object import OpenAIObject
-from typing import Any
+from typing import Any, Callable
+from pydantic import BaseModel, Field
+from openaischema import OpenAISchema
 
 # dataclasses
 
@@ -35,66 +38,31 @@ class StatusTracker:
 @dataclass
 class APIRequest:
     """Stores an API request's inputs, outputs, and other metadata. Contains a method to make an API call."""
-
     task_id: int
     request_json: dict
     attempts_left: int
     metadata: dict
-    token_encoding_name: str = "cl100k_base"
-    model:str = "gpt-3.5-turbo-0613"
-    system_msg:str = "You are a helpful assistant."
-    max_tokens:int = 200
-    functions: list|None = None
-    function_call: dict|str = "auto"
-    messages: list[dict]|None = None
+    token_encoding_name: str
+    model: str
+    system_msg: str
+    max_tokens: int
+    functions: list | None
+    function_call: dict | str
+    preprocess_messages : Callable[[dict, str], list[dict]]
+    postprocess_response : Callable[[OpenAIObject], dict]
+    messages: list[dict] | None = None
     result: list = field(default_factory=list)
+    return_results: bool = False
 
-    def preprocess_messages(self) -> list[dict]:
-        #for sharegpt4 format:
-        """[
-        {
-            "items": [
-                {
-                    "from": "human",
-                    "value": "....in detail James Barr's boo...."
-                },
-                {
-                    "from": "gpt",
-                    "value": "8abf\u55ae\u8a5e\u7684\u5b57\....."
-                }, .....
-                ],
-            "id": "Iaq2CFd",
-            ...
-        }
-        ]
-        """
-        
-        assert self.request_json['items'][0]['from']=="human"
-        self.messages=[
-            {
-                "role": "system",
-                 "content": self.system_msg,
-            },
-            {
-                "role": "user",
-                "content": self.request_json['items'][0]['value'][:200],
-            },
-                ]
-        return self.messages
-    
-    def postprocess_response(self, response: OpenAIObject) -> Any:
-        #customize for results
-
-        return dict(response.choices[0].message)
-
-    
     def num_tokens_consumed_from_request(self):
         """Count the number of tokens in the request. Only supports completion and embedding requests."""
         encoding = tiktoken.get_encoding(self.token_encoding_name)
         # if completions request, tokens = prompt + n * max_tokens
         
         num_tokens = 0
-        messages=self.messages or self.preprocess_messages()
+        messages=self.messages or self.preprocess_messages(
+            self.request_json, 
+            self.system_msg)
         for message in messages:
             num_tokens += 4  # every message follows <im_start>{role/name}\n{content}<im_end>\n
             for key, value in message.items():
@@ -115,7 +83,9 @@ class APIRequest:
         logging.info(f"Starting request #{self.task_id}")
         error = None
         error_filepath=".".join(save_filepath.split(".")[:-1])+"_errors.jsonl"
-        messages=self.messages or self.preprocess_messages()
+        messages=self.messages or self.preprocess_messages(
+            self.request_json, 
+            self.system_msg)
         params=dict(model=self.model,
                     temperature=0,
                     messages=messages,
@@ -123,10 +93,11 @@ class APIRequest:
                     stream=False)
         if self.functions is not None:
             params['functions']=self.functions
-            params['function_call']=self.function_call
+            params['function_call']=self.function_call  # type: ignore
         self.metadata.update({key:value for key,value in params.items() if key!="messages"})
         try:
             response = await openai.ChatCompletion.acreate(**params)
+            assert isinstance(response, OpenAIObject)
             if "error" in response:
                 logging.warning(
                     f"Request {self.task_id} failed with error {response['error']}"
@@ -162,37 +133,72 @@ class APIRequest:
                 status_tracker.num_tasks_failed += 1
         else:
             data = (
-                [self.messages, response, self.metadata]
+                [self.messages, response, self.metadata] # type: ignore
                 if self.metadata
-                else [self.messages, response]
+                else [self.messages, response] # type: ignore
             )
-            append_to_jsonl(data, save_filepath)
+
             status_tracker.num_tasks_in_progress -= 1
             status_tracker.num_tasks_succeeded += 1
-            logging.debug(f"Request {self.task_id} saved to {save_filepath}")
+            
+            if self.return_results:
+                return data
+            else:
+                logging.debug(f"Request {self.task_id} saved to {save_filepath}")
+                append_to_jsonl(data, save_filepath)
+                return None
+
+def preprocess_messages_sharegpt(request_json, system_msg) -> list[dict]:
+    #example for first 200 chars from user input in sharegpt4 format:
+    
+    assert request_json['items'][0]['from']=="human"
+    messages=[
+        {
+            "role": "system",
+                "content": system_msg,
+        },
+        {
+            "role": "user",
+            "content": request_json['items'][0]['value'][:200],
+        },
+        ]
+    return messages
+
+def postprocess_response_default(response: OpenAIObject) -> dict:
+    #customize for results
+    return dict(response.choices[0].message)
 
 
 async def process_api_requests_from_list(
     input_list: list,
-    save_filepath: str,
+    save_filepath: str = "output.jsonl",
+    token_encoding_name: str = "cl100k_base",
+    model: str = "gpt-3.5-turbo-0613",
+    system_msg: str = "You are a helpful assistant.",
+    max_tokens: int = 200,
+    functions: list | None = None,
+    function_call: dict | str = "auto",
+    preprocess_function: Callable[[dict, str], list[dict]] = preprocess_messages_sharegpt,
+    postprocess_function: Callable[[OpenAIObject], dict] = postprocess_response_default,
     check_finished_ids: bool = False,
-    request_class: type = APIRequest,
     max_requests_per_minute: float = 3000.0,
     max_tokens_per_minute: float = 85000.0,
-    token_encoding_name: str = "cl100k_base",
     max_attempts: int = 10,
-    logging_level: int = 10,  # 10 Debug, 20 info, 30 warning
-):
+    logging_level: int = 10,
+    verbose: bool = True,
+    write_to_file: bool = True
+    ):
     """Processes API requests in parallel, throttling to stay under rate limits."""
     # constants
     seconds_to_pause_after_rate_limit_error = 15
     seconds_to_sleep_each_loop = 0.001  # 1 ms limits max throughput to 1,000 requests per second
-
+    
     # initialize logging
     logging.basicConfig(level=logging_level)
     logging.debug(f"Logging initialized at level {logging_level}")
 
     # initialize trackers
+    results_future_list = []
     queue_of_requests_to_retry = asyncio.Queue()
     task_id_generator = task_id_generator_function()  # generates integer IDs of 1, 2, 3, ...
     status_tracker = StatusTracker()  # single instance to track a collection of variables
@@ -231,12 +237,20 @@ async def process_api_requests_from_list(
                             f"Skipping request {next_task_id} because it is already finished"
                         )
                         continue
-                    next_request = request_class(
+                    next_request = APIRequest(
                         task_id=next_task_id,
                         request_json=next_task,
                         attempts_left=max_attempts,
                         metadata=next_task.pop("metadata", {}),
                         token_encoding_name=token_encoding_name,
+                        model=model,
+                        system_msg=system_msg,
+                        max_tokens=max_tokens,
+                        functions=functions,
+                        function_call=function_call,
+                        preprocess_messages=preprocess_function,
+                        postprocess_response=postprocess_function,
+                        return_results=not write_to_file
                     )
                     status_tracker.num_tasks_started += 1
                     if status_tracker.num_tasks_started % 200 == 0:
@@ -274,13 +288,15 @@ async def process_api_requests_from_list(
                 next_request.attempts_left -= 1
 
                 # call API
-                asyncio.create_task(
+                task=asyncio.create_task(
                     next_request.call_api(
                         retry_queue=queue_of_requests_to_retry,
                         save_filepath=save_filepath,
                         status_tracker=status_tracker,
                     )
                 )
+                if not write_to_file:
+                    results_future_list.append(task)
                 next_request = None  # reset next_request to empty
 
         # if all tasks are finished, break
@@ -299,13 +315,18 @@ async def process_api_requests_from_list(
             logging.warn(f"Pausing to cool down until {time.ctime(status_tracker.time_of_last_rate_limit_error + seconds_to_pause_after_rate_limit_error)}")
 
     # after finishing, log final status
-    logging.info(f"""Parallel processing complete. Results saved to {save_filepath}""")
     if status_tracker.num_tasks_failed > 0:
         logging.warning(f"{status_tracker.num_tasks_failed} / {status_tracker.num_tasks_started} requests failed. Errors logged to {save_filepath}.")
     if status_tracker.num_rate_limit_errors > 0:
         logging.warning(f"{status_tracker.num_rate_limit_errors} rate limit errors received. Consider running at a lower rate.")
-    return status_tracker
-
+    if verbose:
+        print(status_tracker)
+    if not write_to_file:
+        logging.info(f"""Parallel processing complete. Results returned""")
+        return [item for item in await asyncio.gather(*results_future_list) if item is not None]
+    else:
+        logging.info(f"""Parallel processing complete. Results saved to {save_filepath}""")
+        return status_tracker
 
 
 # functions
@@ -391,6 +412,8 @@ def get_finished_tasks_from_file(file_path: str) -> set[int]:
     except FileNotFoundError:
         logging.debug(f"No finished tasks found")
         return set()
+    
+
 
 
 # run script
@@ -403,11 +426,48 @@ if __name__ == "__main__":
     with open("//Users/jph/dev2/german_finetuning_data/openchat/sharegpt_gpt4.json", "r") as f:
         sharegpt_gpt4_train = json.load(f)
     # run script
-    status_tracker = asyncio.run(
+    """status_tracker = asyncio.run(
         process_api_requests_from_list(
             input_list=sharegpt_gpt4_train[:20], #[:1500],
             save_filepath="test_output.jsonl",
             max_attempts=1
         )
+    )"""
+    class LanguageCode(OpenAISchema):
+        """"A single language code in ISO 639-1 format"""
+        lc: str = Field(..., description="Language code (e.g. 'en', 'de', 'fr')")
+
+    class LanguageClassification(OpenAISchema):
+        """Classify the languages of a user prompt."""
+        
+        language_codes: list[LanguageCode] = Field(default_factory=list, description="A list of up to 2 languages present in the text. Exclude code sections, loanwords and technical terms in the text when deciding on the language codes. You have to output at least one language code, even if you are not certain or the text is very short!", max_items=2)
+        main_language_code: LanguageCode = Field(..., description="Main Language of the text.")
+
+    def postprocess_response(response: OpenAIObject) -> Any:
+        #customize for results
+        try:
+            lang_class=LanguageClassification.from_response(response)
+        except AttributeError as e:
+            #logging.warning(f"Could not classify languages for {self.task_id}, parsing error")
+            raise e
+        res_dict={'num_languages':len(lang_class.language_codes),
+                  'main_language':lang_class.main_language_code.lc,}
+        #TODO rest der metadaten (token etc.) in Klasse erledigen und loggen
+        #TODO Tests schreiben
+        return res_dict
+
+    results = asyncio.run(
+    process_api_requests_from_list(
+        input_list=sharegpt_gpt4_train[:3], #[:1500],
+        write_to_file=False,
+        max_attempts=1,
+        system_msg="You are a world-class linguist and fluent in all major languages. Your job is to determine which languages are present in the user text and which one is the main language.",
+        postprocess_function=postprocess_response,
+        functions=[LanguageClassification.openai_schema],
+        function_call={"name": "LanguageClassification"}
+        )
     )
-    print(status_tracker)
+    print(len(results))
+    print(results[0])
+    print()
+    print(results[1])
