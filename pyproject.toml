@@ -1,0 +1,30 @@
+[tool.poetry]
+name = "openai_request_runner"
+version = "0.0.1"
+description = "Slim Runner for Batched OpenAI Requests"
+authors = [
+    "Jan Philipp Harries <jan@jph.me>",
+]
+license = "commercial"
+readme = "README.md"
+
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python :: 3.10",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+
+[tool.poetry.dependencies]
+python = ">=3.10, <4.0"
+openai = "^0.27.2"
+tiktoken = "^0.3.3"
+ipykernel = "^6.22.0"
+nest-asyncio = "^1.5.6"
+pydantic = "^1.8.2"
+requests = "^2.26.0"
+python-dotenv = "^1.0.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
