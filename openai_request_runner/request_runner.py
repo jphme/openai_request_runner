@@ -1,13 +1,7 @@
-# from https://github.com/openai/openai-cookbook/blob/main/examples/api_request_parallel_processor.py
-from abc import abstractmethod
-from ast import Call
-import aiohttp  # for making API calls concurrently
-import argparse  # for running script from command line
+# inspired by https://github.com/openai/openai-cookbook/blob/main/examples/api_request_parallel_processor.py
 import asyncio  # for running API calls concurrently
 import json  # for saving results to a jsonl file
 import logging  # for logging rate limit warnings and other messages
-import os  # for reading API key
-import re  # for matching endpoint from request URL
 import tiktoken  # for counting tokens
 import time  # for sleeping after rate limit is hit
 from dataclasses import (
@@ -16,10 +10,23 @@ from dataclasses import (
 )  # for storing API inputs, outputs, and metadata
 import openai
 from openai.openai_object import OpenAIObject
-from typing import Any, Callable
-from pydantic import BaseModel, Field
-from openaischema import OpenAISchema
-from utils import append_to_jsonl
+from typing import Any, Callable, Iterable
+from pydantic import Field
+from openai_request_runner.openaischema import OpenAISchema
+from openai_request_runner.utils import append_to_jsonl
+
+RATE_LIMITS = {
+    "gpt-3.5-turbo-0613": {
+        "max_requests_per_minute": 3400,
+        "max_tokens_per_minute": 88000,
+    },
+    "gpt-3.5-turbo-16k-0613": {
+        "max_requests_per_minute": 3400,
+        "max_tokens_per_minute": 176000,
+    },
+    "gpt-4-0613": {"max_requests_per_minute": 195, "max_tokens_per_minute": 39800},
+}
+
 
 # dataclasses
 
@@ -223,7 +230,7 @@ def get_id_from_finished_default(result_list: list) -> int:
 
 
 async def process_api_requests_from_list(
-    input_list: list,
+    inputs: Iterable[dict],
     save_filepath: str | None = None,
     error_filepath: str = "error_log.jsonl",
     token_encoding_name: str = "cl100k_base",
@@ -242,10 +249,11 @@ async def process_api_requests_from_list(
     check_finished_ids: bool = False,
     get_id_from_finished: Callable[[list], int | str] = get_id_from_finished_default,
     finished_ids: set[int] | None = None,
-    max_requests_per_minute: float = 3000.0,
-    max_tokens_per_minute: float = 85000.0,
-    max_attempts: int = 3,
+    max_requests_per_minute: float | None = None,
+    max_tokens_per_minute: float | None = None,
+    max_attempts: int = 2,
     logging_level: int = 10,
+    num_max_requests: int | None = None,
     verbose: bool = True,
 ):
     """Processes API requests in parallel, throttling to stay under rate limits."""
@@ -253,6 +261,10 @@ async def process_api_requests_from_list(
         write_to_file = False
     else:
         write_to_file = True
+    if max_requests_per_minute is None:
+        max_requests_per_minute = RATE_LIMITS[model]["max_requests_per_minute"]
+    if max_tokens_per_minute is None:
+        max_tokens_per_minute = RATE_LIMITS[model]["max_tokens_per_minute"]
 
     # constants
     seconds_to_pause_after_rate_limit_error = 15
@@ -306,7 +318,7 @@ async def process_api_requests_from_list(
     file_not_finished = True  # after file is empty, we'll skip reading it
     logging.debug(f"Initialization complete.")
 
-    task_generator = iter(input_list)
+    task_generator = iter(inputs)
     logging.debug("Entering main loop")
 
     while True:
@@ -315,7 +327,10 @@ async def process_api_requests_from_list(
             if not queue_of_requests_to_retry.empty():
                 next_request = queue_of_requests_to_retry.get_nowait()
                 logging.debug(f"Retrying request {next_request.task_id}")
-            elif file_not_finished:
+            elif file_not_finished and (
+                num_max_requests is None
+                or num_max_requests > status_tracker.num_tasks_started
+            ):
                 try:
                     # get new request
                     next_task = next(task_generator)
@@ -398,6 +413,13 @@ async def process_api_requests_from_list(
         # if all tasks are finished, break
         if status_tracker.num_tasks_in_progress == 0:
             break
+
+        # if max requests reached, break
+        if num_max_requests is not None:
+            if (
+                status_tracker.num_tasks_succeeded + status_tracker.num_tasks_failed
+            ) >= num_max_requests:
+                break
 
         # main loop sleeps briefly so concurrent tasks can run
         await asyncio.sleep(seconds_to_sleep_each_loop)
@@ -518,115 +540,4 @@ def task_id_generator_function():
         task_id += 1
 
 
-# run script
-
-
-if __name__ == "__main__":
-    openai_logger = logging.getLogger("openai")
-    # Set the logging level for the logger to WARNING
-    openai_logger.setLevel(logging.WARNING)
-    with open(
-        "//Users/jph/dev2/german_finetuning_data/openchat/sharegpt_gpt4.json", "r"
-    ) as f:
-        sharegpt_gpt4_train = json.load(f)
-    # run script
-    """status_tracker = asyncio.run(
-        process_api_requests_from_list(
-            input_list=sharegpt_gpt4_train[:20], #[:1500],
-            save_filepath="test_output.jsonl",
-            max_attempts=1
-        )
-    )"""
-
-    class LanguageCode(OpenAISchema):
-        """ "A single language code in ISO 639-1 format"""
-
-        lc: str = Field(..., description="Language code (e.g. 'en', 'de', 'fr')")
-
-    class LanguageClassification(OpenAISchema):
-        """Classify the languages of a user prompt."""
-
-        language_codes: list[LanguageCode] = Field(
-            default_factory=list,
-            description="A list of up to 2 languages present in the text. Exclude code sections, loanwords and technical terms in the text when deciding on the language codes. You have to output at least one language code, even if you are not certain or the text is very short!",
-            max_items=2,
-        )
-        main_language_code: LanguageCode = Field(
-            ..., description="Main Language of the text."
-        )
-
-    """def postprocess_response(response: OpenAIObject, metadata) -> Any:
-        #customize for results
-        try:
-            lang_class=LanguageClassification.from_response(response)
-        except AttributeError as e:
-            #logging.warning(f"Could not classify languages for {self.task_id}, parsing error")
-            raise e
-        res_dict={'num_languages':len(lang_class.language_codes),
-                  'main_language':lang_class.main_language_code.lc,}
-        #TODO rest der metadaten (token etc.) in Klasse erledigen und loggen
-        #TODO Tests schreiben
-        return res_dict"""
-
-    def postprocess_response(
-        response: OpenAIObject, request_json: dict, metadata: dict
-    ) -> Any:
-        # customize for results
-        try:
-            lang_class = LanguageClassification.from_response(response)
-        except AttributeError as e:
-            logging.warning(
-                f"Could not classify languages for {metadata['task_id']}, parsing error"
-            )
-            raise e
-        encoding = tiktoken.get_encoding(metadata["token_encoding_name"])
-        num_tokens = 0
-        for message in request_json["items"]:
-            try:
-                num_tokens += len(encoding.encode(message["value"]))
-            except:
-                logging.debug(f"Could not encode messages for {metadata['task_id']}")
-                continue
-        res_dict = {
-            "num_languages": len(lang_class.language_codes),
-            "main_language": lang_class.main_language_code.lc,
-            "language_codes": [item.lc for item in lang_class.language_codes],
-            "id": request_json["id"],
-            "task_id": metadata["task_id"],
-            "turns": len(request_json["items"]),
-            "tokens": num_tokens,
-        }
-        return res_dict
-
-    def get_finished_tasks_from_file_new(file_path: str) -> set[int]:
-        """Get a list of task IDs that have already been completed."""
-        try:
-            with open(file_path) as file:
-                # `requests` will provide requests one at a time
-                finished = file.__iter__()
-                finished_ids = set(json.loads(line)[1]["id"] for line in finished)
-                logging.debug(f"Finished Tasks found and loaded")
-                return finished_ids
-        except FileNotFoundError:
-            logging.debug(f"No finished tasks found")
-            return set()
-
-    results = asyncio.run(
-        process_api_requests_from_list(
-            input_list=sharegpt_gpt4_train[:2],  # [:1500],
-            max_attempts=1,
-            system_msg="You are a world-class linguist and fluent in all major languages. Your job is to determine which languages are present in the user text and which one is the main language.",
-            postprocess_function=postprocess_response,
-            functions=[LanguageClassification.openai_schema],
-            function_call={"name": "LanguageClassification"},
-            save_filepath="test_output.jsonl",
-            check_finished_ids=False,
-            # id_field_getter=None,
-            # read_finished_tasks_func=get_finished_tasks_from_file_new,
-        )
-    )
-    """print(sharegpt_gpt4_train[0])
-    print(len(results))
-    print(results[0])
-    print()
-    print(results[1])"""
+# see examples for usage

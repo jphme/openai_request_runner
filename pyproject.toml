@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "openai_request_runner"
-version = "0.0.1"
-description = "Slim Runner for Batched OpenAI Requests"
+version = "0.0.2"
+description = "Slim Runner for batched OpenAI Requests"
 authors = [
     "Jan Philipp Harries <jan@jph.me>",
 ]
