@@ -7,6 +7,7 @@ on:
 
 jobs:
   release:
+    environment: llms
     runs-on: ubuntu-latest
 
     strategy:
@@ -25,7 +26,7 @@ jobs:
         uses: snok/install-poetry@v1.3.1
 
       - name: Install dependencies
-        run: poetry install
+        run: poetry install --with dev
 
       - name: Run test
         run: poetry run pytest tests/

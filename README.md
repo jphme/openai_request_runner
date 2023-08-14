@@ -1,6 +1,6 @@
 # OpenAI Request Runner
 
-A Python package designed to facilitate parallel processing of OpenAI API requests. This implementation is inspired by the [OpenAI cookbook example](https://github.com/openai/openai-cookbook/blob/main/examples/api_request_parallel_processor.py) but offers advanced customization capabilities and integration with OpenAI Functions (leaning on the great [openai_function_call library](https://github.com/jxnl/openai_function_call)). It ensures efficient and organized interactions with the OpenAI models.
+A lightweight Python package designed to facilitate parallel processing of OpenAI API requests. This implementation is inspired by the [OpenAI cookbook example](https://github.com/openai/openai-cookbook/blob/main/examples/api_request_parallel_processor.py) but offers advanced customization capabilities and integration with OpenAI Functions (leaning on the great [openai_function_call library](https://github.com/jxnl/openai_function_call)). It ensures efficient and organized interactions with the OpenAI models.
 Features
 
 * Parallel Processing: Handle multiple OpenAI API requests concurrently.
@@ -31,12 +31,31 @@ poetry install
 ```
 ## Usage
 
-See `examples/classify_languages.py` and `examples/translate.py` for detailed examples of how to use the package.
+Minimal example:
+```python
+import asyncio
+from openai_request_runner import process_api_requests_from_list
+
+example_input = [{"id": 0, "prompt": "What is 1+1?"}]
+results = await process_api_requests_from_list(
+    example_input, system_prompt="Translate input to French"
+)
+print(results[0][1]["content"])
+# "Qu'est-ce que 1+1 ?"
+```
+
+See `examples/classify_languages.py` and `examples/translate.py` for detailed examples of how to use the package for advanced usecases.
 
 
 The package allows for extensive customization. You can set your desired preprocessing function, postprocessing function, and other parameters to suit your specific needs.
 
 Refer to the inline documentation and docstrings in the code for detailed information on each function and its parameters.
+
+### Run Tests
+
+```bash
+poetry run pytest tests/
+``````
 
 ## Contributing
 
