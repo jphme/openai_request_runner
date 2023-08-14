@@ -8,7 +8,7 @@ authors = [
 license = "commercial"
 readme = "README.md"
 packages = [{include = "openai_request_runner"}]
-repository = "ttps://github.com/jphme/openai_request_runner"
+repository = "https://github.com/jphme/openai_request_runner"
 
 
 classifiers = [
