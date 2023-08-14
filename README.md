@@ -49,9 +49,14 @@ import asyncio
 from openai_request_runner import process_api_requests_from_list
 
 example_input = [{"id": 0, "prompt": "What is 1+1?"}]
-results = await process_api_requests_from_list(
-    example_input, system_prompt="Translate input to French"
+results = asyncio.run(
+    process_api_requests_from_list(
+        example_input, system_prompt="Translate input to French"
+    )
 )
+#or in a notebook:
+#results = await process_api_requests_from_list(...
+
 print(results[0][1]["content"])
 # "Qu'est-ce que 1+1 ?"
 ```
