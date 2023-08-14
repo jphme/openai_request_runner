@@ -1,5 +1,17 @@
 # OpenAI Request Runner
 
+
+[![Pypi](https://img.shields.io/pypi/v/openai-request-runner?color=g
+)](https://pypi.org/project/openai-request-runner/)
+[![CI](https://github.com/jphme/openai_request_runner/actions/workflows/test.yml/badge.svg)](https://github.com/jphme/openai_request_runner/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-g.svg)](https://opensource.org/licenses/MIT)
+[![Status](https://img.shields.io/pypi/status/openai-request-runner
+)](https://pypi.org/project/openai-request-runner/)
+
+
+[![Twitter](https://img.shields.io/twitter/follow/jphme
+)](https://twitter.com/jphme)
+
 A lightweight Python package designed to facilitate parallel processing of OpenAI API requests. This implementation is inspired by the [OpenAI cookbook example](https://github.com/openai/openai-cookbook/blob/main/examples/api_request_parallel_processor.py) but offers advanced customization capabilities and integration with OpenAI Functions (leaning on the great [openai_function_call library](https://github.com/jxnl/openai_function_call)). It ensures efficient and organized interactions with the OpenAI models.
 Features
 

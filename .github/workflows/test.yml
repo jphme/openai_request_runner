@@ -7,7 +7,7 @@ on:
 
 jobs:
   release:
-    environment: llms
+    #environment: llms
     runs-on: ubuntu-latest
 
     strategy:
