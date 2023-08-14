@@ -9,6 +9,8 @@ jobs:
   release:
     #environment: llms
     runs-on: ubuntu-latest
+    env:
+      OPENAI_API_TOKEN: ${{ secrets.OPENAI_API_TOKEN }}
 
     strategy:
       matrix:
