@@ -1,3 +1,6 @@
+# This example shows how to use the OpenAI API to classify the languages of a user input.
+# see example input and out in example_input_sharegpt.json and example_output_lc.jsonl
+
 from pydantic import Field
 import json
 import asyncio
@@ -34,6 +37,17 @@ class LanguageClassification(OpenAISchema):
 def postprocess_response(
     response: OpenAIObject, request_json: dict, metadata: dict
 ) -> Any:
+    """
+    Postprocesses the API response to obtain language classification and related information.
+
+    Args:
+    - response (OpenAIObject): The response object from the OpenAI API call.
+    - request_json (dict): The original request sent to the API.
+    - metadata (dict): Metadata associated with the API request.
+
+    Returns:
+    - dict: A dictionary containing the language classification results and related information.
+    """
     # customize for results
     try:
         lang_class = LanguageClassification.from_response(response)
@@ -42,6 +56,7 @@ def postprocess_response(
             f"Could not classify languages for {metadata['task_id']}, parsing error"
         )
         raise e
+
     encoding = tiktoken.get_encoding(metadata["token_encoding_name"])
     num_tokens = 0
     for message in request_json["items"]:
@@ -50,6 +65,7 @@ def postprocess_response(
         except:
             logging.debug(f"Could not encode messages for {metadata['task_id']}")
             continue
+
     res_dict = {
         "num_languages": len(lang_class.language_codes),
         "main_language": lang_class.main_language_code.lc,
@@ -62,14 +78,16 @@ def postprocess_response(
     return res_dict
 
 
-# RUN THE REQUESTS
-
+# Setting up logging for OpenAI to suppress verbose logs
 openai_logger = logging.getLogger("openai")
-# Set the logging level for the logger to WARNING
+# Set the logging level for the logger to WARNING to suppress logs below this level
 openai_logger.setLevel(logging.WARNING)
+
+# Load input data for processing
 with open("examples/example_input_sharegpt.json", "r") as f:
     sharegpt_gpt4_train = json.load(f)
 
+# Process the requests and obtain results
 results = asyncio.run(
     process_api_requests_from_list(
         inputs=iter(sharegpt_gpt4_train),

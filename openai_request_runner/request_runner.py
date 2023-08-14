@@ -256,7 +256,85 @@ async def process_api_requests_from_list(
     num_max_requests: int | None = None,
     verbose: bool = True,
 ):
-    """Processes API requests in parallel, throttling to stay under rate limits."""
+    """
+    Processes a list of API requests in parallel, ensuring that they stay under rate limits. 
+    Saves the results to a file or returns them, depending on the `save_filepath` argument.
+
+    Args:
+        inputs (Iterable[dict]): An iterable of API request payloads to be processed.
+        
+        save_filepath (str | None, optional): Path to save the processed results. If None, results will be returned. Defaults to None.
+        
+        error_filepath (str, optional): Path to save any errors encountered during processing. Defaults to "error_log.jsonl".
+        
+        token_encoding_name (str, optional): Name of the token encoding scheme to be used. Defaults to "cl100k_base".
+        
+        model (str, optional): Name of the OpenAI model to use. Defaults to "gpt-3.5-turbo-0613".
+        
+        system_msg (str, optional): System message to be sent before any other message. Defaults to "You are a helpful assistant.".
+        
+        max_tokens (int, optional): Maximum tokens allowed in a single request. Defaults to 200.
+        
+        id_field_getter (Callable[[dict], str | int] | None, optional): Function to extract the ID from the input request. Defaults to lambda x: x["id"].
+        
+        functions (list | None, optional): List of functions to be used in the API request (if any). Defaults to None.
+        
+        function_call (dict | str, optional): Function call details to be used in the API request. Defaults to "auto".
+        
+        preprocess_function (Callable, optional): Function to preprocess the input messages before sending the request.
+            Example Implementation:
+                def preprocess_messages_example(request_json: dict, metadata: dict) -> list[dict]:
+                    '''
+                    A simplified preprocess function that takes the 'content' field from the request_json 
+                    and returns it wrapped in a list of dictionaries.
+                    '''
+                    messages = [
+                        {
+                            "role": "user",
+                            "content": request_json["content"],
+                        }
+                    ]
+                    return messages
+            Defaults to preprocess_messages_sharegpt.
+            
+        postprocess_function (Callable, optional): Function to process the response received from the API. It can be used to extract specific parts of the response, reformat it, or add additional information.
+            Example Implementation:
+                def postprocess_response_example(response: OpenAIObject, request_json: dict, metadata: dict) -> dict:
+                    '''
+                    A simplified postprocess function that extracts the message content from the API response.
+                    '''
+                    return {"response_content": response.choices[0].message['content']}
+            Defaults to postprocess_response_default.
+        
+        check_finished_ids (bool, optional): Whether to check for IDs of already completed tasks and skip them. Defaults to False.
+            
+        get_id_from_finished (Callable, optional): Function to extract the ID from a finished result. If you're processing a list of tasks and saving the results, you might want to skip the tasks that were already completed in a previous run. This function helps in identifying the IDs of those completed tasks.
+            Example Implementation:
+                def get_id_from_finished_example(result_list: list) -> int:
+                    '''
+                    A simplified function to extract the 'task_id' from the metadata of a result.
+                    '''
+                    return result_list[2]["metadata"]["task_id"]
+            Defaults to get_id_from_finished_default.
+        
+        finished_ids (set[int] | None, optional): Set of IDs of already completed tasks, if available. Defaults to None.
+        
+        max_requests_per_minute (float | None, optional): Maximum number of requests allowed per minute. If None, will use the rate limits for the specified model. Defaults to None.
+        
+        max_tokens_per_minute (float | None, optional): Maximum number of tokens allowed per minute. If None, will use the rate limits for the specified model. Defaults to None.
+        
+        max_attempts (int, optional): Maximum number of attempts for each request before considering it as failed. Defaults to 2.
+        
+        logging_level (int, optional): Logging level to be used. Defaults to 10 (DEBUG level).
+        
+        num_max_requests (int | None, optional): Maximum number of requests to process. If None, will process all the inputs. Defaults to None.
+        
+        verbose (bool, optional): If True, prints the status tracker after processing. Defaults to True.
+
+    Returns:
+        StatusTracker | List[dict]: If `save_filepath` is provided, returns an instance of StatusTracker indicating the processing status. 
+                                   Otherwise, returns a list of dictionaries containing the results.
+    """
     if save_filepath is None:
         write_to_file = False
     else:

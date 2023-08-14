@@ -1,3 +1,5 @@
+# copied from https://github.com/jxnl/openai_function_call
+
 import json
 from pydantic import BaseModel
 
@@ -11,6 +13,7 @@ def _remove_a_key(d, remove_key) -> None:
             else:
                 _remove_a_key(d[key], remove_key)
 
+
 class OpenAISchema(BaseModel):
     @classmethod
     @property
@@ -19,7 +22,7 @@ class OpenAISchema(BaseModel):
         parameters = {
             k: v for k, v in schema.items() if k not in ("title", "description")
         }
-        parameters['required']=sorted(parameters['properties'])
+        parameters["required"] = sorted(parameters["properties"])
         _remove_a_key(parameters, "title")
         return {
             "name": schema["title"],
@@ -40,9 +43,11 @@ class OpenAISchema(BaseModel):
         function_call = message["function_call"]
         arguments = json.loads(function_call["arguments"])
         return cls(**arguments)
-    
+
     @classmethod
     def from_response_langchain(cls, completion):
-        function_call=completion.generations[0][0].message.additional_kwargs['function_call']
+        function_call = completion.generations[0][0].message.additional_kwargs[
+            "function_call"
+        ]
         arguments = json.loads(function_call["arguments"])
         return cls(**arguments)
