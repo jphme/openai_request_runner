@@ -111,7 +111,7 @@ results = asyncio.run(
     process_api_requests_from_list(
         inputs=iter(sharegpt_gpt4_train),
         max_attempts=1,
-        system_msg=system_template,
+        system_prompt=system_template,
         preprocess_function=preprocess_messages_sharegpt,
         postprocess_function=postprocess_response,
         functions=[TranslatedConversation.openai_schema],

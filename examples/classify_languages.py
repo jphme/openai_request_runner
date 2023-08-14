@@ -31,7 +31,23 @@ class LanguageClassification(OpenAISchema):
     )
 
 
-# Function for postprocessing the response
+# Functions for processing input and response
+
+def preprocess_messages_sharegpt(request_json: dict, metadata: dict) -> list[dict]:
+    # example for first 200 chars from user input in sharegpt4 format:
+
+    assert request_json["items"][0]["from"] == "human"
+    messages = [
+        {
+            "role": "system",
+            "content": metadata["system_msg"],
+        },
+        {
+            "role": "user",
+            "content": request_json["items"][0]["value"][:200],
+        },
+    ]
+    return messages
 
 
 def postprocess_response(
@@ -92,7 +108,8 @@ results = asyncio.run(
     process_api_requests_from_list(
         inputs=iter(sharegpt_gpt4_train),
         max_attempts=1,
-        system_msg="You are a world-class linguist and fluent in all major languages. Your job is to determine which languages are present in the user text and which one is the main language.",
+        system_prompt="You are a world-class linguist and fluent in all major languages. Your job is to determine which languages are present in the user text and which one is the main language.",
+        preprocess_function=preprocess_messages_sharegpt,
         postprocess_function=postprocess_response,
         functions=[LanguageClassification.openai_schema],
         function_call={"name": "LanguageClassification"},

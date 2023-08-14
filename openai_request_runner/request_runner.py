@@ -185,10 +185,8 @@ class APIRequest:
                 return None
 
 
-def preprocess_messages_sharegpt(request_json: dict, metadata: dict) -> list[dict]:
-    # example for first 200 chars from user input in sharegpt4 format:
-
-    assert request_json["items"][0]["from"] == "human"
+def preprocess_messages(request_json: dict, metadata: dict) -> list[dict]:
+    #preprocess input to openai format
     messages = [
         {
             "role": "system",
@@ -196,7 +194,7 @@ def preprocess_messages_sharegpt(request_json: dict, metadata: dict) -> list[dic
         },
         {
             "role": "user",
-            "content": request_json["items"][0]["value"][:200],
+            "content": request_json["prompt"],
         },
     ]
     return messages
@@ -235,14 +233,14 @@ async def process_api_requests_from_list(
     error_filepath: str = "error_log.jsonl",
     token_encoding_name: str = "cl100k_base",
     model: str = "gpt-3.5-turbo-0613",
-    system_msg: str = "You are a helpful assistant.",
+    system_prompt: str = "You are a helpful assistant.",
     max_tokens: int = 200,
     id_field_getter: Callable[[dict], str | int] | None = lambda x: x["id"],
     functions: list | None = None,
     function_call: dict | str = "auto",
     preprocess_function: Callable[
         [dict, dict], list[dict]
-    ] = preprocess_messages_sharegpt,
+    ] = preprocess_messages,
     postprocess_function: Callable[
         [OpenAIObject, dict, dict], dict
     ] = postprocess_response_default,
@@ -271,7 +269,7 @@ async def process_api_requests_from_list(
         
         model (str, optional): Name of the OpenAI model to use. Defaults to "gpt-3.5-turbo-0613".
         
-        system_msg (str, optional): System message to be sent before any other message. Defaults to "You are a helpful assistant.".
+        system_prompt (str, optional): System message to be sent before any other message. Defaults to "You are a helpful assistant.".
         
         max_tokens (int, optional): Maximum tokens allowed in a single request. Defaults to 200.
         
@@ -424,7 +422,7 @@ async def process_api_requests_from_list(
                     metadata = next_task.pop("metadata", {})
                     metadata["token_encoding_name"] = token_encoding_name
                     metadata["model"] = model
-                    metadata["system_msg"] = system_msg
+                    metadata["system_msg"] = system_prompt
                     metadata["max_tokens"] = max_tokens
                     metadata["functions"] = functions
                     metadata["function_call"] = function_call
@@ -617,5 +615,12 @@ def task_id_generator_function():
         yield task_id
         task_id += 1
 
-
-# see examples for usage
+#minimal usage example
+if __name__=='__main__':
+    example_input = [{'id':0,'prompt':'What is 1+1?'}]
+    results=asyncio.run(process_api_requests_from_list(example_input,
+                                           system_prompt='Translate input to French'))
+    print(results[0][1]['content']) #type: ignore
+    #"Qu'est-ce que 1+1 ?"
+    
+    # see examples/ for advanced usage
