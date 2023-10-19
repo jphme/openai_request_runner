@@ -32,7 +32,15 @@ You are a brilliant translator and your job is to translate the conversation int
 
 Please adhere to the following rules:
 - Do not change the meaning of the text
-... [snipped for brevity]
+- Do not add or remove information
+- Do not change the style of the text
+- Do not change the tone of the text
+- Do only translate english text to German and leave all other text as is
+- Do not translate any names
+- Use always the direct/casual form of German address ("Du" instead of "Sie") except in formal settings (e.g. if the user asks to write an official letter)
+- Do not translate any computer code (most often denoted with triple backticks like ```) and comments in the code
+- When in doubt don't translate word for word but rather translate the meaning of the sentence in a way that sounds natural in German!
+
 When in doubt don't translate word for word but rather translate the meaning of the sentence in a way that sounds natural in German!
 
 The conversation is in a json template with a list of alternate turns between the user and the assistant.
@@ -111,12 +119,14 @@ results = asyncio.run(
     process_api_requests_from_list(
         inputs=iter(sharegpt_gpt4_train),
         max_attempts=1,
+        model="gpt-3.5-turbo-0613",
         system_prompt=system_template,
         preprocess_function=preprocess_messages_sharegpt,
         postprocess_function=postprocess_response,
         functions=[TranslatedConversation.openai_schema],
         function_call={"name": "TranslatedConversation"},
         save_filepath="examples/example_output_translate.jsonl",
+        raw_request_filepath="examples/example_translate_requests.jsonl",
         check_finished_ids=True,
         num_max_requests=2,
     )

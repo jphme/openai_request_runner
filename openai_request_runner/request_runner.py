@@ -147,7 +147,10 @@ class APIRequest:
                 response.usage.completion_tokens
             )
             if raw_request_filepath is not None:
-                append_to_jsonl(response, raw_request_filepath)
+                tmp_raw_request = response.copy()
+                tmp_raw_request["request"] = params
+                tmp_raw_request["task_id"] = self.task_id
+                append_to_jsonl(tmp_raw_request, raw_request_filepath)
             response = self.postprocess_response(
                 response, self.request_json, self.metadata
             )
@@ -228,8 +231,8 @@ def get_finished_tasks_from_file(file_path: str) -> set[int]:
         return set()
 
 
-def get_id_from_finished_default(result_list: list) -> int:
-    return result_list[2]["task_id"]
+def get_id_from_finished_default(result: dict) -> int | str:
+    return result["task_id"]
 
 
 async def process_api_requests_from_list(
@@ -249,7 +252,7 @@ async def process_api_requests_from_list(
         [OpenAIObject, dict, dict], dict
     ] = postprocess_response_default,
     check_finished_ids: bool = False,
-    get_id_from_finished: Callable[[list], int | str] = get_id_from_finished_default,
+    get_id_from_finished: Callable[[dict], int | str] = get_id_from_finished_default,
     finished_ids: set[int] | None = None,
     max_requests_per_minute: float | None = None,
     max_tokens_per_minute: float | None = None,
@@ -631,7 +634,7 @@ if __name__ == "__main__":
             example_input, system_prompt="Translate input to French"
         )
     )
-    print(results[0][1]["content"])  # type: ignore
+    print(results[0]["content"])  # type: ignore
     # "Qu'est-ce que 1+1 ?"
 
     # see examples/ for advanced usage
