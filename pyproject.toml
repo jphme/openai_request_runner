@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "openai_request_runner"
-version = "0.0.5"
+version = "0.0.6"
 description = "Slim Runner for batched OpenAI Requests"
 authors = [
     "Jan Philipp Harries",
@@ -13,7 +13,7 @@ repository = "https://github.com/jphme/openai_request_runner"
 
 classifiers = [
   "Development Status :: 4 - Beta",
-  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.9",
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Typing :: Typed",
 ]
@@ -27,7 +27,28 @@ requests = "^2.26.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest =  "*"
+ruff = "*"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+addopts = """\
+    --cov openai_request_runner \
+    --cov tests \
+    --cov-report term-missing \
+    --no-cov-on-fail \
+"""
+testpaths = [
+    "tests",
+]
+
+[tool.ruff]
+extend-include = ["*.ipynb"]
+exclude = [".git", ".ruff_cache", ".venv", ".pytest_cache"]
+ignore = ["E501"]
+ignore-init-module-imports = true
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["E402", "F401", "F403"]
