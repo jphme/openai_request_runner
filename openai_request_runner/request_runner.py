@@ -2,17 +2,18 @@
 import asyncio  # for running API calls concurrently
 import json  # for saving results to a jsonl file
 import logging  # for logging rate limit warnings and other messages
-import tiktoken  # for counting tokens
 import time  # for sleeping after rate limit is hit
 from dataclasses import (
     dataclass,
     field,
-)  # for storing API inputs, outputs, and metadata
+)
+from typing import Callable, Iterable, Optional, Union
+
+# for storing API inputs, outputs, and metadata
 import openai
+import tiktoken  # for counting tokens
 from openai.openai_object import OpenAIObject
-from typing import Any, Callable, Iterable
-from pydantic import Field
-from openai_request_runner.openaischema import OpenAISchema
+
 from openai_request_runner.utils import append_to_jsonl
 
 RATE_LIMITS = {
@@ -53,13 +54,13 @@ class StatusTracker:
 class APIRequest:
     """Stores an API request's inputs, outputs, and other metadata. Contains a method to make an API call."""
 
-    task_id: int | str
+    task_id: Union[int, str]
     request_json: dict
     attempts_left: int
     metadata: dict
     preprocess_messages: Callable[[dict, dict], list[dict]]
     postprocess_response: Callable[[OpenAIObject, dict, dict], dict]
-    messages: list[dict] | None = None
+    messages: Optional[list[dict]] = None
     result: list = field(default_factory=list)
     return_results: bool = False
 
@@ -97,8 +98,8 @@ class APIRequest:
     async def call_api(
         self,
         retry_queue: asyncio.Queue,
-        save_filepath: str | None,
-        raw_request_filepath: str | None,
+        save_filepath: Optional[str],
+        raw_request_filepath: Optional[str],
         error_filepath: str,
         status_tracker: StatusTracker,
         temperature: float = 0,
@@ -155,9 +156,7 @@ class APIRequest:
                 response, self.request_json, self.metadata
             )
 
-        except (
-            Exception
-        ) as e:  # catching naked exceptions is bad practice, but in this case we'll log & save them
+        except Exception as e:  # catching naked exceptions is bad practice, but in this case we'll log & save them
             logging.warning(f"Request {self.task_id} failed with Exception {e}")
             status_tracker.num_other_errors += 1
             error = e
@@ -224,41 +223,43 @@ def get_finished_tasks_from_file(file_path: str) -> set[int]:
             finished_ids = set(
                 int(list(json.loads(line).keys())[0]) for line in finished
             )
-            logging.debug(f"Finished Tasks found and loaded")
+            logging.debug("Finished Tasks found and loaded")
             return finished_ids
     except FileNotFoundError:
-        logging.debug(f"No finished tasks found")
+        logging.debug("No finished tasks found")
         return set()
 
 
-def get_id_from_finished_default(result: dict) -> int | str:
+def get_id_from_finished_default(result: dict) -> Union[int, str]:
     return result["task_id"]
 
 
 async def process_api_requests_from_list(
     inputs: Iterable[dict],
-    save_filepath: str | None = None,
-    raw_request_filepath: str | None = None,
+    save_filepath: Optional[str] = None,
+    raw_request_filepath: Optional[str] = None,
     error_filepath: str = "error_log.jsonl",
     token_encoding_name: str = "cl100k_base",
     model: str = "gpt-3.5-turbo-0613",
     system_prompt: str = "You are a helpful assistant.",
     max_tokens: int = 200,
-    id_field_getter: Callable[[dict], str | int] | None = lambda x: x["id"],
-    functions: list | None = None,
-    function_call: dict | str = "auto",
+    id_field_getter: Optional[Callable[[dict], Union[str, int]]] = lambda x: x["id"],
+    functions: Optional[list] = None,
+    function_call: Union[dict, str] = "auto",
     preprocess_function: Callable[[dict, dict], list[dict]] = preprocess_messages,
     postprocess_function: Callable[
         [OpenAIObject, dict, dict], dict
     ] = postprocess_response_default,
     check_finished_ids: bool = False,
-    get_id_from_finished: Callable[[dict], int | str] = get_id_from_finished_default,
-    finished_ids: set[int] | None = None,
-    max_requests_per_minute: float | None = None,
-    max_tokens_per_minute: float | None = None,
+    get_id_from_finished: Callable[
+        [dict], Union[int, str]
+    ] = get_id_from_finished_default,
+    finished_ids: Optional[set[int]] = None,
+    max_requests_per_minute: Optional[float] = None,
+    max_tokens_per_minute: Optional[float] = None,
     max_attempts: int = 2,
     logging_level: int = 10,
-    num_max_requests: int | None = None,
+    num_max_requests: Optional[int] = None,
     verbose: bool = True,
     temperature: float = 0,
 ):
@@ -388,7 +389,7 @@ async def process_api_requests_from_list(
                         f"{len(finished_tasks)} finished tasks found and loaded"
                     )
             except FileNotFoundError:
-                logging.debug(f"No finished tasks found")
+                logging.debug("No finished tasks found")
                 finished_tasks = set()
         else:
             assert (
@@ -400,7 +401,7 @@ async def process_api_requests_from_list(
 
     # initialize flags
     file_not_finished = True  # after file is empty, we'll skip reading it
-    logging.debug(f"Initialization complete.")
+    logging.debug("Initialization complete.")
 
     task_generator = iter(inputs)
     logging.debug("Entering main loop")
@@ -536,7 +537,7 @@ async def process_api_requests_from_list(
     if verbose:
         print(status_tracker)
     if not write_to_file:
-        logging.info(f"""Parallel processing complete. Results returned""")
+        logging.info("""Parallel processing complete. Results returned""")
         return [
             item
             for item in await asyncio.gather(*results_future_list)
@@ -550,13 +551,6 @@ async def process_api_requests_from_list(
 
 
 # functions
-
-
-def append_to_jsonl(data, filename: str) -> None:
-    """Append a json payload to the end of a jsonl file."""
-    json_string = json.dumps(data)
-    with open(filename, "a") as f:
-        f.write(json_string + "\n")
 
 
 def num_tokens_consumed_from_request(
@@ -576,7 +570,9 @@ def num_tokens_consumed_from_request(
         if api_endpoint.startswith("chat/"):
             num_tokens = 0
             for message in request_json["messages"]:
-                num_tokens += 4  # every message follows <im_start>{role/name}\n{content}<im_end>\n
+                num_tokens += (
+                    4
+                )  # every message follows <im_start>{role/name}\n{content}<im_end>\n
                 for key, value in message.items():
                     num_tokens += len(encoding.encode(value))
                     if key == "name":  # if there's a name, the role is omitted

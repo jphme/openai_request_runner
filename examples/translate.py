@@ -1,12 +1,14 @@
 # This example shows how to use the OpenAIRequestRunner to translate a conversation from English to German.
 # see example input and out in example_input_sharegpt.json and example_output_translate.jsonl
 
-from pydantic import Field
-import json
 import asyncio
-from openai.openai_object import OpenAIObject
-from typing import Any
+import json
 import logging
+from typing import Any
+
+from openai.openai_object import OpenAIObject
+from pydantic import Field
+
 from openai_request_runner import OpenAISchema, process_api_requests_from_list
 
 
@@ -58,10 +60,6 @@ def preprocess_messages_sharegpt(request_json: dict, metadata: dict) -> list[dic
     Returns:
     - list[dict]: A list containing the system and user messages to be sent to the API.
     """
-    # Concatenate all messages into one string
-    conversation_string = "\n---!!---\n".join(
-        [item["value"] for item in request_json["items"]]
-    )
 
     messages = [
         {
