@@ -178,15 +178,14 @@ class APIRequest:
                 status_tracker.num_tasks_in_progress -= 1
                 status_tracker.num_tasks_failed += 1
         else:
-            assert isinstance(response, dict)  # type: ignore
             status_tracker.num_tasks_in_progress -= 1
             status_tracker.num_tasks_succeeded += 1
 
             if not save_filepath:
-                return response
+                return response  # type: ignore
             else:
                 logging.debug(f"Request {self.task_id} saved to {save_filepath}")
-                append_to_jsonl(response, save_filepath)
+                append_to_jsonl(response, save_filepath)  # type: ignore
                 return None
 
 
@@ -540,7 +539,9 @@ async def process_api_requests_from_list(
         logging.info("""Parallel processing complete. Results returned""")
         return [
             item
-            for item in await asyncio.gather(*results_future_list)
+            for item in await asyncio.gather(
+                *results_future_list, return_exceptions=True
+            )
             if item is not None
         ]
     else:
