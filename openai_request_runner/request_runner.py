@@ -745,17 +745,11 @@ def run_openai_requests(
 # minimal usage example
 if __name__ == "__main__":
     example_input = [{"id": 0, "prompt": "What is 1+1?"}]
-    # results = asyncio.run(
-    #    process_api_requests_from_list(
-    #        example_input, system_prompt="Translate input to French"
-    #    )
-    # )
     print(
         run_openai_requests(example_input, system_prompt="Translate input to French")[
             0
         ]["content"]
     )
-    # print(results[0]["content"])  # type: ignore
     # "Qu'est-ce que 1+1 ?"
 
     # see examples/ for advanced usage
