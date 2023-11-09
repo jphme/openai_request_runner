@@ -10,7 +10,9 @@ from dataclasses import (
 from typing import Callable, Iterable, Optional, Union
 
 # for storing API inputs, outputs, and metadata
-import openai
+from openai import AsyncOpenAI
+
+aclient = AsyncOpenAI()
 import tiktoken  # for counting tokens
 from openai.openai_object import OpenAIObject
 
@@ -129,7 +131,7 @@ class APIRequest:
             {key: value for key, value in params.items() if key != "messages"}
         )
         try:
-            response = await openai.ChatCompletion.acreate(**params)
+            response = await aclient.chat.completions.create(**params)
             assert isinstance(response, OpenAIObject)
             if "error" in response:
                 logging.warning(
