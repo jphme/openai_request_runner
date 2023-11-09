@@ -22,8 +22,9 @@ classifiers = [
 python = ">=3.9, <4.0"
 openai = "^1.0.0"
 tiktoken = "^0.3.3"
-pydantic = "^1.8.2"
+pydantic = "^2.0.2"
 requests = "^2.26.0"
+instructor = "^0.3.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest =  "*"

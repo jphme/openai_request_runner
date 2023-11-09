@@ -1,5 +1,5 @@
 # inspired by https://github.com/openai/openai-cookbook/blob/main/examples/api_request_parallel_processor.py
-import asyncio  # for running API calls concurrently
+import asyncio
 import json  # for saving results to a jsonl file
 import logging  # for logging rate limit warnings and other messages
 import time  # for sleeping after rate limit is hit
@@ -7,29 +7,24 @@ from dataclasses import (
     dataclass,
     field,
 )
-from typing import Callable, Iterable, Optional, Union
+from typing import Any, Callable, Iterable, Optional, Union
 
-# for storing API inputs, outputs, and metadata
+import instructor
+import tiktoken
 from openai import AsyncOpenAI
-
-aclient = AsyncOpenAI()
-import tiktoken  # for counting tokens
-from openai.openai_object import OpenAIObject
+from openai.types.chat.chat_completion import ChatCompletion
 
 from openai_request_runner.utils import append_to_jsonl
 
-RATE_LIMITS = {
-    "gpt-3.5-turbo-0613": {
-        "max_requests_per_minute": 3400,
-        "max_tokens_per_minute": 88000,
-    },
-    "gpt-3.5-turbo-16k-0613": {
-        "max_requests_per_minute": 3400,
-        "max_tokens_per_minute": 176000,
-    },
-    "gpt-4-0613": {"max_requests_per_minute": 195, "max_tokens_per_minute": 39800},
-}
+aclient = instructor.patch(AsyncOpenAI())
 
+DEFAULT_RATE_LIMITS = {
+    "gpt-3.5": {
+        "max_requests_per_minute": 10000,
+        "max_tokens_per_minute": 1000000,
+    },
+    "gpt-4": {"max_requests_per_minute": 10000, "max_tokens_per_minute": 300000},
+}
 
 # dataclasses
 
@@ -61,10 +56,11 @@ class APIRequest:
     attempts_left: int
     metadata: dict
     preprocess_messages: Callable[[dict, dict], list[dict]]
-    postprocess_response: Callable[[OpenAIObject, dict, dict], dict]
+    postprocess_response: Callable[[ChatCompletion, dict, dict], dict]
     messages: Optional[list[dict]] = None
     result: list = field(default_factory=list)
     return_results: bool = False
+    debug: bool = False
 
     def __post_init__(self):
         # load metadata from metadata object for more readable code
@@ -107,7 +103,7 @@ class APIRequest:
         temperature: float = 0,
     ):
         """Calls the OpenAI API and saves results."""
-        logging.info(f"Starting request #{self.task_id}")
+        logging.debug(f"Starting request #{self.task_id}")
         error = None
         error_filepath = (
             ".".join(save_filepath.split(".")[:-1]) + "_errors.jsonl"
@@ -131,38 +127,46 @@ class APIRequest:
             {key: value for key, value in params.items() if key != "messages"}
         )
         try:
+            if self.debug:
+                logging.debug(f"Request params: {params}")
             response = await aclient.chat.completions.create(**params)
-            assert isinstance(response, OpenAIObject)
-            if "error" in response:
-                logging.warning(
-                    f"Request {self.task_id} failed with error {response['error']}"
-                )
-                status_tracker.num_api_errors += 1
-                error = response
-                if "Rate limit" in response["error"].get("message", ""):
-                    status_tracker.time_of_last_rate_limit_error = time.time()
-                    status_tracker.num_rate_limit_errors += 1
-                    status_tracker.num_api_errors -= (
-                        1  # rate limit errors are counted separately
-                    )
+            assert isinstance(response, ChatCompletion)
             status_tracker.num_prompt_tokens_used += response.usage.prompt_tokens
             status_tracker.num_completion_tokens_used += (
                 response.usage.completion_tokens
             )
             if raw_request_filepath is not None:
-                tmp_raw_request = response.copy()
+                tmp_raw_request = response.model_dump()
                 tmp_raw_request["request"] = params
                 tmp_raw_request["task_id"] = self.task_id
                 append_to_jsonl(tmp_raw_request, raw_request_filepath)
-            response = self.postprocess_response(
-                response, self.request_json, self.metadata
-            )
-
-        except Exception as e:  # catching naked exceptions is bad practice, but in this case we'll log & save them
+        except Exception as e:  # handling request errors
             logging.warning(f"Request {self.task_id} failed with Exception {e}")
             status_tracker.num_other_errors += 1
             error = e
-            # raise e #todo debug raus
+            response = None
+            if self.debug:
+                logging.warning(params)
+                raise e
+
+        if response is not None:
+            if self.debug:
+                logging.debug(f"Response before postprocessing: {response}")
+            try:
+                response = self.postprocess_response(
+                    response, self.request_json, self.metadata
+                )
+            except Exception as e:
+                # handling postporcessing errors
+                logging.warning(
+                    f"Error during postprocessing for request {self.task_id}: {e}"
+                )
+                status_tracker.num_other_errors += 1
+                error = e
+                response = None
+                if self.debug:
+                    raise e
+
         if error:
             self.result.append(error)
             if self.attempts_left:
@@ -179,16 +183,17 @@ class APIRequest:
                 append_to_jsonl(data, error_filepath)
                 status_tracker.num_tasks_in_progress -= 1
                 status_tracker.num_tasks_failed += 1
+            return None
         else:
             status_tracker.num_tasks_in_progress -= 1
             status_tracker.num_tasks_succeeded += 1
 
             if not save_filepath:
-                return response  # type: ignore
+                logging.info(f"Request {self.task_id} suceeded.")
             else:
-                logging.debug(f"Request {self.task_id} saved to {save_filepath}")
+                logging.info(f"Request {self.task_id} saved to {save_filepath}")
                 append_to_jsonl(response, save_filepath)  # type: ignore
-                return None
+            return response
 
 
 def preprocess_messages(request_json: dict, metadata: dict) -> list[dict]:
@@ -207,7 +212,7 @@ def preprocess_messages(request_json: dict, metadata: dict) -> list[dict]:
 
 
 def postprocess_response_default(
-    response: OpenAIObject, request_json: dict, metadata: dict
+    response: ChatCompletion, request_json: dict, metadata: dict
 ) -> dict:
     # customize for results
     tmperg = dict(response.choices[0].message)
@@ -224,10 +229,10 @@ def get_finished_tasks_from_file(file_path: str) -> set[int]:
             finished_ids = set(
                 int(list(json.loads(line).keys())[0]) for line in finished
             )
-            logging.debug("Finished Tasks found and loaded")
+            logging.info("Finished Tasks found and loaded")
             return finished_ids
     except FileNotFoundError:
-        logging.debug("No finished tasks found")
+        logging.info("No finished tasks found")
         return set()
 
 
@@ -239,17 +244,17 @@ async def process_api_requests_from_list(
     inputs: Iterable[dict],
     save_filepath: Optional[str] = None,
     raw_request_filepath: Optional[str] = None,
-    error_filepath: str = "error_log.jsonl",
+    error_filepath: str = "tmp_error_log.jsonl",
     token_encoding_name: str = "cl100k_base",
-    model: str = "gpt-3.5-turbo-0613",
+    model: str = "gpt-3.5-turbo-1106",
     system_prompt: str = "You are a helpful assistant.",
-    max_tokens: int = 200,
+    max_tokens: int = 1024,
     id_field_getter: Optional[Callable[[dict], Union[str, int]]] = lambda x: x["id"],
     functions: Optional[list] = None,
     function_call: Union[dict, str] = "auto",
     preprocess_function: Callable[[dict, dict], list[dict]] = preprocess_messages,
     postprocess_function: Callable[
-        [OpenAIObject, dict, dict], dict
+        [ChatCompletion, dict, dict], dict
     ] = postprocess_response_default,
     check_finished_ids: bool = False,
     get_id_from_finished: Callable[
@@ -259,11 +264,11 @@ async def process_api_requests_from_list(
     max_requests_per_minute: Optional[float] = None,
     max_tokens_per_minute: Optional[float] = None,
     max_attempts: int = 2,
-    logging_level: int = 10,
+    logging_level: int = 20,
     num_max_requests: Optional[int] = None,
-    verbose: bool = True,
     temperature: float = 0,
-):
+    debug: bool = False,
+) -> list[Any]:
     """
     Processes a list of API requests in parallel, ensuring that they stay under rate limits.
     Saves the results to a file or returns them, depending on the `save_filepath` argument.
@@ -307,7 +312,7 @@ async def process_api_requests_from_list(
 
         postprocess_function (Callable, optional): Function to process the response received from the API. It can be used to extract specific parts of the response, reformat it, or add additional information.
             Example Implementation:
-                def postprocess_response_example(response: OpenAIObject, request_json: dict, metadata: dict) -> dict:
+                def postprocess_response_example(response: ChatCompletion, request_json: dict, metadata: dict) -> dict:
                     '''
                     A simplified postprocess function that extracts the message content from the API response.
                     '''
@@ -337,8 +342,6 @@ async def process_api_requests_from_list(
 
         num_max_requests (int | None, optional): Maximum number of requests to process. If None, will process all the inputs. Defaults to None.
 
-        verbose (bool, optional): If True, prints the status tracker after processing. Defaults to True.
-
     Returns:
         StatusTracker | List[dict]: If `save_filepath` is provided, returns an instance of StatusTracker indicating the processing status.
                                    Otherwise, returns a list of dictionaries containing the results.
@@ -348,9 +351,17 @@ async def process_api_requests_from_list(
     else:
         write_to_file = True
     if max_requests_per_minute is None:
-        max_requests_per_minute = RATE_LIMITS[model]["max_requests_per_minute"]
+        for model_name_stub in DEFAULT_RATE_LIMITS.keys():
+            if model.startswith(model_name_stub):
+                max_requests_per_minute = DEFAULT_RATE_LIMITS[model_name_stub][
+                    "max_requests_per_minute"
+                ]
     if max_tokens_per_minute is None:
-        max_tokens_per_minute = RATE_LIMITS[model]["max_tokens_per_minute"]
+        for model_name_stub in DEFAULT_RATE_LIMITS.keys():
+            if model.startswith(model_name_stub):
+                max_tokens_per_minute = DEFAULT_RATE_LIMITS[model_name_stub][
+                    "max_tokens_per_minute"
+                ]
 
     # constants
     seconds_to_pause_after_rate_limit_error = 15
@@ -402,20 +413,27 @@ async def process_api_requests_from_list(
 
     # initialize flags
     file_not_finished = True  # after file is empty, we'll skip reading it
+    max_requests_not_reached = (
+        True  # after max requests reached, we'll stop reading file
+    )
     logging.debug("Initialization complete.")
 
     task_generator = iter(inputs)
-    logging.debug("Entering main loop")
+    logging.info("Entering main loop")
 
     while True:
         # get next request (if one is not already waiting for capacity)
         if next_request is None:
             if not queue_of_requests_to_retry.empty():
                 next_request = queue_of_requests_to_retry.get_nowait()
-                logging.debug(f"Retrying request {next_request.task_id}")
-            elif file_not_finished and (
-                num_max_requests is None
-                or num_max_requests > status_tracker.num_tasks_started
+                logging.info(f"Retrying request {next_request.task_id}")
+            elif (
+                file_not_finished
+                and max_requests_not_reached
+                and (
+                    num_max_requests is None
+                    or num_max_requests > status_tracker.num_tasks_started
+                )
             ):
                 try:
                     # get new request
@@ -445,17 +463,24 @@ async def process_api_requests_from_list(
                         preprocess_messages=preprocess_function,
                         postprocess_response=postprocess_function,
                         return_results=not write_to_file,
+                        debug=debug,
                     )
                     status_tracker.num_tasks_started += 1
                     if status_tracker.num_tasks_started % 200 == 0:
-                        print(status_tracker)
+                        logging.info(status_tracker)
                     status_tracker.num_tasks_in_progress += 1
                     logging.debug(f"Reading request {next_request.task_id}")
                 except StopIteration:
                     # if file runs out, set flag to stop reading it
-                    logging.debug("Read file exhausted")
+                    logging.info("Request List exhausted")
                     file_not_finished = False
-
+            elif (
+                file_not_finished
+                and num_max_requests is not None
+                and max_requests_not_reached
+            ):
+                logging.info(f"Max number of requests reached ({num_max_requests})")
+                max_requests_not_reached = False
         # update available capacity
         current_time = time.time()
         seconds_since_update = current_time - last_update_time
@@ -522,7 +547,7 @@ async def process_api_requests_from_list(
             )
             await asyncio.sleep(remaining_seconds_to_pause)
             # ^e.g., if pause is 15 seconds and final limit was hit 5 seconds ago
-            logging.warn(
+            logging.warning(
                 f"Pausing to cool down until {time.ctime(status_tracker.time_of_last_rate_limit_error + seconds_to_pause_after_rate_limit_error)}"
             )
 
@@ -535,22 +560,14 @@ async def process_api_requests_from_list(
         logging.warning(
             f"{status_tracker.num_rate_limit_errors} rate limit errors received. Consider running at a lower rate."
         )
-    if verbose:
-        print(status_tracker)
-    if not write_to_file:
-        logging.info("""Parallel processing complete. Results returned""")
-        return [
-            item
-            for item in await asyncio.gather(
-                *results_future_list, return_exceptions=True
-            )
-            if item is not None
-        ]
-    else:
-        logging.info(
-            f"""Parallel processing complete. Results saved to {save_filepath}"""
-        )
-        return status_tracker
+    logging.info(status_tracker)
+    if write_to_file:
+        logging.info(f"Parallel processing complete. Results saved to {save_filepath}")
+    return [
+        item
+        for item in await asyncio.gather(*results_future_list, return_exceptions=True)
+        if item is not None
+    ]
 
 
 # functions
@@ -573,9 +590,7 @@ def num_tokens_consumed_from_request(
         if api_endpoint.startswith("chat/"):
             num_tokens = 0
             for message in request_json["messages"]:
-                num_tokens += (
-                    4
-                )  # every message follows <im_start>{role/name}\n{content}<im_end>\n
+                num_tokens += 4  # every message follows <im_start>{role/name}\n{content}<im_end>\n
                 for key, value in message.items():
                     num_tokens += len(encoding.encode(value))
                     if key == "name":  # if there's a name, the role is omitted

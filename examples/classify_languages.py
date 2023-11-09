@@ -1,13 +1,14 @@
 # This example shows how to use the OpenAI API to classify the languages of a user input.
 # see example input and out in example_input_sharegpt.json and example_output_lc.jsonl
 
-from pydantic import Field
-import json
 import asyncio
-from openai.openai_object import OpenAIObject
-from typing import Any
-import tiktoken
+import json
 import logging
+from typing import Any
+
+import tiktoken
+from pydantic import Field
+
 from openai_request_runner import OpenAISchema, process_api_requests_from_list
 
 
@@ -33,6 +34,7 @@ class LanguageClassification(OpenAISchema):
 
 # Functions for processing input and response
 
+
 def preprocess_messages_sharegpt(request_json: dict, metadata: dict) -> list[dict]:
     # example for first 200 chars from user input in sharegpt4 format:
 
@@ -50,9 +52,7 @@ def preprocess_messages_sharegpt(request_json: dict, metadata: dict) -> list[dic
     return messages
 
 
-def postprocess_response(
-    response: OpenAIObject, request_json: dict, metadata: dict
-) -> Any:
+def postprocess_response(response, request_json: dict, metadata: dict) -> Any:
     """
     Postprocesses the API response to obtain language classification and related information.
 
@@ -113,8 +113,11 @@ results = asyncio.run(
         postprocess_function=postprocess_response,
         functions=[LanguageClassification.openai_schema],
         function_call={"name": "LanguageClassification"},
-        save_filepath="examples/example_output_lc.jsonl",
+        save_filepath="examples/data/example_output_lc.jsonl",
+        raw_request_filepath="examples/data/example_raw_requests_lc.jsonl",
         check_finished_ids=True,
         num_max_requests=2,
+        logging_level=10,
+        debug=True,
     )
 )
