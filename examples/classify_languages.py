@@ -7,13 +7,14 @@ import logging
 from typing import Any
 
 import tiktoken
-from pydantic import Field
+from instructor import OpenAISchema
+from pydantic import BaseModel, Field
 
-from openai_request_runner import OpenAISchema, process_api_requests_from_list
+from openai_request_runner import process_api_requests_from_list
 
 
 # Classes for OpenAI Functions
-class LanguageCode(OpenAISchema):
+class LanguageCode(BaseModel):
     """ "A single language code in ISO 639-1 format"""
 
     lc: str = Field(..., description="Language code (e.g. 'en', 'de', 'fr')")
@@ -95,18 +96,21 @@ def postprocess_response(response, request_json: dict, metadata: dict) -> Any:
 
 
 # Setting up logging for OpenAI to suppress verbose logs
-openai_logger = logging.getLogger("openai")
+# openai_logger = logging.getLogger("openai")
 # Set the logging level for the logger to WARNING to suppress logs below this level
-openai_logger.setLevel(logging.WARNING)
+# openai_logger.setLevel(logging.WARNING)
 
 # Load input data for processing
-with open("examples/example_input_sharegpt.json", "r") as f:
+with open("examples/data/example_input_sharegpt.json", "r") as f:
     sharegpt_gpt4_train = json.load(f)
 
+
+logging.basicConfig(level=logging.INFO)
 # Process the requests and obtain results
 results = asyncio.run(
     process_api_requests_from_list(
         inputs=iter(sharegpt_gpt4_train),
+        model="gpt-3.5-turbo",
         max_attempts=1,
         system_prompt="You are a world-class linguist and fluent in all major languages. Your job is to determine which languages are present in the user text and which one is the main language.",
         preprocess_function=preprocess_messages_sharegpt,
@@ -115,9 +119,9 @@ results = asyncio.run(
         function_call={"name": "LanguageClassification"},
         save_filepath="examples/data/example_output_lc.jsonl",
         raw_request_filepath="examples/data/example_raw_requests_lc.jsonl",
-        check_finished_ids=True,
+        check_finished_ids=False,
         num_max_requests=2,
-        logging_level=10,
-        debug=True,
+        logging_level=20,
+        debug=False,
     )
 )

@@ -9,14 +9,13 @@ from dataclasses import (
 )
 from typing import Any, Callable, Iterable, Optional, Union
 
-import instructor
 import tiktoken
 from openai import AsyncOpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 
 from openai_request_runner.utils import append_to_jsonl
 
-aclient = instructor.patch(AsyncOpenAI())
+aclient = AsyncOpenAI()
 
 DEFAULT_RATE_LIMITS = {
     "gpt-3.5": {
@@ -356,12 +355,23 @@ async def process_api_requests_from_list(
                 max_requests_per_minute = DEFAULT_RATE_LIMITS[model_name_stub][
                     "max_requests_per_minute"
                 ]
+                break
+        logging.info(f"Max requests per minute set to {max_requests_per_minute}")
+    if max_requests_per_minute is None:
+        max_requests_per_minute = 10000
+        logging.warning(
+            f"Max requests per minute not set and model {model} not found in defaults, using default value of 10000 rpm/1m tpm"
+        )
     if max_tokens_per_minute is None:
         for model_name_stub in DEFAULT_RATE_LIMITS.keys():
             if model.startswith(model_name_stub):
                 max_tokens_per_minute = DEFAULT_RATE_LIMITS[model_name_stub][
                     "max_tokens_per_minute"
                 ]
+                break
+        logging.info(f"Max tokens per minute set to {max_tokens_per_minute}")
+    if max_tokens_per_minute is None:
+        max_tokens_per_minute = 10000000
 
     # constants
     seconds_to_pause_after_rate_limit_error = 15
@@ -519,8 +529,7 @@ async def process_api_requests_from_list(
                         temperature=temperature,
                     )
                 )
-                if not write_to_file:
-                    results_future_list.append(task)
+                results_future_list.append(task)
                 next_request = None  # reset next_request to empty
 
         # if all tasks are finished, break
@@ -563,6 +572,23 @@ async def process_api_requests_from_list(
     logging.info(status_tracker)
     if write_to_file:
         logging.info(f"Parallel processing complete. Results saved to {save_filepath}")
+
+    """result_list = []
+    for coroutine in asyncio.as_completed(results_future_list):
+        try:
+            exception = coroutine.exception()
+            print(exception)
+            result = await coroutine
+            if result is not None:
+                result_list.append(result)
+            continue
+        except Exception as e:
+            logging.warning(f"Error in coroutine: {e}")
+            if debug:
+                raise e
+            continue
+    return result_list"""
+
     return [
         item
         for item in await asyncio.gather(*results_future_list, return_exceptions=True)
