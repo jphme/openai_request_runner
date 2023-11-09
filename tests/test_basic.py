@@ -5,7 +5,8 @@ from instructor import OpenAISchema
 from openai import APIConnectionError, APITimeoutError
 from pydantic import Field
 
-from openai_request_runner import process_api_requests_from_list
+from openai_request_runner import run_openai_requests
+from openai_request_runner.request_runner import process_api_requests_from_list
 
 
 # Needs OpenAI API Key in environment variable OPENAI_API_KEY
@@ -16,7 +17,8 @@ class TestOpenAIRunner(unittest.TestCase):
 
     def test_basic_functionality(self):
         try:
-            results = asyncio.run(process_api_requests_from_list(self.example_input))
+            # results = asyncio.run(process_api_requests_from_list(self.example_input))
+            results = run_openai_requests(self.example_input)
             assert "2" in results[0]["content"]  # type: ignore
         except (APITimeoutError, APIConnectionError) as e:
             self.skipTest(f"Skipped due to Connection Error: {e}")

@@ -15,8 +15,6 @@ from openai.types.chat.chat_completion import ChatCompletion
 
 from openai_request_runner.utils import append_to_jsonl
 
-aclient = AsyncOpenAI()
-
 DEFAULT_RATE_LIMITS = {
     "gpt-3.5": {
         "max_requests_per_minute": 10000,
@@ -94,6 +92,7 @@ class APIRequest:
 
     async def call_api(
         self,
+        openai_client: AsyncOpenAI,
         retry_queue: asyncio.Queue,
         save_filepath: Optional[str],
         raw_request_filepath: Optional[str],
@@ -128,7 +127,7 @@ class APIRequest:
         try:
             if self.debug:
                 logging.debug(f"Request params: {params}")
-            response = await aclient.chat.completions.create(**params)
+            response = await openai_client.chat.completions.create(**params)
             assert isinstance(response, ChatCompletion)
             status_tracker.num_prompt_tokens_used += response.usage.prompt_tokens
             status_tracker.num_completion_tokens_used += (
@@ -266,7 +265,8 @@ async def process_api_requests_from_list(
     logging_level: int = 20,
     num_max_requests: Optional[int] = None,
     temperature: float = 0,
-    debug: bool = False,
+    debug: Optional[bool] = False,
+    openai_client: Optional[AsyncOpenAI] = None,
 ) -> list[Any]:
     """
     Processes a list of API requests in parallel, ensuring that they stay under rate limits.
@@ -345,6 +345,8 @@ async def process_api_requests_from_list(
         StatusTracker | List[dict]: If `save_filepath` is provided, returns an instance of StatusTracker indicating the processing status.
                                    Otherwise, returns a list of dictionaries containing the results.
     """
+    if openai_client is None:
+        openai_client = AsyncOpenAI()
     if save_filepath is None:
         write_to_file = False
     else:
@@ -521,6 +523,7 @@ async def process_api_requests_from_list(
                 # call API
                 task = asyncio.create_task(
                     next_request.call_api(
+                        openai_client=openai_client,
                         retry_queue=queue_of_requests_to_retry,
                         save_filepath=save_filepath,
                         raw_request_filepath=raw_request_filepath,
@@ -666,15 +669,93 @@ def task_id_generator_function():
         task_id += 1
 
 
+def run_openai_requests(
+    inputs: Iterable[dict],
+    save_filepath: Optional[str] = None,
+    raw_request_filepath: Optional[str] = None,
+    error_filepath: str = "tmp_error_log.jsonl",
+    token_encoding_name: str = "cl100k_base",
+    model: str = "gpt-3.5-turbo-1106",
+    system_prompt: str = "You are a helpful assistant.",
+    max_tokens: int = 1024,
+    id_field_getter: Optional[Callable[[dict], Union[str, int]]] = lambda x: x["id"],
+    functions: Optional[list] = None,
+    function_call: Union[dict, str] = "auto",
+    preprocess_function: Callable[[dict, dict], list[dict]] = preprocess_messages,
+    postprocess_function: Callable[
+        [ChatCompletion, dict, dict], dict
+    ] = postprocess_response_default,
+    check_finished_ids: bool = False,
+    get_id_from_finished: Callable[
+        [dict], Union[int, str]
+    ] = get_id_from_finished_default,
+    finished_ids: Optional[set[int]] = None,
+    max_requests_per_minute: Optional[float] = None,
+    max_tokens_per_minute: Optional[float] = None,
+    max_attempts: int = 2,
+    logging_level: int = 20,
+    num_max_requests: Optional[int] = None,
+    temperature: float = 0,
+    debug: Optional[bool] = None,
+    openai_client: Optional[AsyncOpenAI] = None,
+    api_base: Optional[str] = None,
+    api_key: Optional[str] = None,
+    **kwargs,
+) -> list[Any]:
+    if debug:
+        logging_level = 10
+    logging.basicConfig(level=logging_level)
+    openai_logger = logging.getLogger("openai")
+    openai_logger.setLevel(logging.WARNING)
+    if openai_client is None:
+        openai_client = AsyncOpenAI(base_url=api_base, api_key=api_key)
+
+    return asyncio.run(
+        process_api_requests_from_list(
+            inputs=inputs,
+            save_filepath=save_filepath,
+            raw_request_filepath=raw_request_filepath,
+            error_filepath=error_filepath,
+            token_encoding_name=token_encoding_name,
+            model=model,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            id_field_getter=id_field_getter,
+            functions=functions,
+            function_call=function_call,
+            preprocess_function=preprocess_function,
+            postprocess_function=postprocess_function,
+            check_finished_ids=check_finished_ids,
+            get_id_from_finished=get_id_from_finished,
+            finished_ids=finished_ids,
+            max_requests_per_minute=max_requests_per_minute,
+            max_tokens_per_minute=max_tokens_per_minute,
+            max_attempts=max_attempts,
+            logging_level=logging_level,
+            num_max_requests=num_max_requests,
+            temperature=temperature,
+            debug=debug,
+            openai_client=openai_client,
+            **kwargs,
+        ),
+        debug=debug,
+    )
+
+
 # minimal usage example
 if __name__ == "__main__":
     example_input = [{"id": 0, "prompt": "What is 1+1?"}]
-    results = asyncio.run(
-        process_api_requests_from_list(
-            example_input, system_prompt="Translate input to French"
-        )
+    # results = asyncio.run(
+    #    process_api_requests_from_list(
+    #        example_input, system_prompt="Translate input to French"
+    #    )
+    # )
+    print(
+        run_openai_requests(example_input, system_prompt="Translate input to French")[
+            0
+        ]["content"]
     )
-    print(results[0]["content"])  # type: ignore
+    # print(results[0]["content"])  # type: ignore
     # "Qu'est-ce que 1+1 ?"
 
     # see examples/ for advanced usage

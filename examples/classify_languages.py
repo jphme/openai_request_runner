@@ -79,8 +79,10 @@ def postprocess_response(response, request_json: dict, metadata: dict) -> Any:
     for message in request_json["items"]:
         try:
             num_tokens += len(encoding.encode(message["value"]))
-        except:
-            logging.debug(f"Could not encode messages for {metadata['task_id']}")
+        except Exception as e:
+            logging.debug(
+                f"Could not encode messages for {metadata['task_id']}, error {e}"
+            )
             continue
 
     res_dict = {
