@@ -6,10 +6,10 @@ import json
 import logging
 from typing import Any
 
-from openai.openai_object import OpenAIObject
+from instructor import OpenAISchema
 from pydantic import Field
 
-from openai_request_runner import OpenAISchema, process_api_requests_from_list
+from openai_request_runner import process_api_requests_from_list
 
 
 # Classes for OpenAI Functions
@@ -71,9 +71,7 @@ def preprocess_messages_sharegpt(request_json: dict, metadata: dict) -> list[dic
     return messages
 
 
-def postprocess_response(
-    response: OpenAIObject, request_json: dict, metadata: dict
-) -> Any:
+def postprocess_response(response, request_json: dict, metadata: dict) -> Any:
     """
     Postprocesses the API response to obtain translated conversation.
 
@@ -104,12 +102,12 @@ def postprocess_response(
     return res_dict
 
 
-# Setting up logging for OpenAI to suppress verbose logs
+logging.basicConfig(level=logging.INFO)
 openai_logger = logging.getLogger("openai")
 openai_logger.setLevel(logging.WARNING)
 
 # Load input data for processing
-with open("examples/example_input_sharegpt.json", "r") as f:
+with open("examples/data/example_input_sharegpt.json", "r") as f:
     sharegpt_gpt4_train = json.load(f)
 
 # Process the requests and obtain results
@@ -123,8 +121,8 @@ results = asyncio.run(
         postprocess_function=postprocess_response,
         functions=[TranslatedConversation.openai_schema],
         function_call={"name": "TranslatedConversation"},
-        save_filepath="examples/example_output_translate.jsonl",
-        raw_request_filepath="examples/example_translate_requests.jsonl",
+        save_filepath="examples/data/example_output_translate.jsonl",
+        raw_request_filepath="examples/data/example_raw_requests_translation.jsonl",
         check_finished_ids=True,
         num_max_requests=2,
     )

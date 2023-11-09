@@ -95,17 +95,14 @@ def postprocess_response(response, request_json: dict, metadata: dict) -> Any:
     return res_dict
 
 
-# Setting up logging for OpenAI to suppress verbose logs
-# openai_logger = logging.getLogger("openai")
-# Set the logging level for the logger to WARNING to suppress logs below this level
-# openai_logger.setLevel(logging.WARNING)
-
 # Load input data for processing
 with open("examples/data/example_input_sharegpt.json", "r") as f:
     sharegpt_gpt4_train = json.load(f)
 
 
 logging.basicConfig(level=logging.INFO)
+openai_logger = logging.getLogger("openai")
+openai_logger.setLevel(logging.WARNING)
 # Process the requests and obtain results
 results = asyncio.run(
     process_api_requests_from_list(

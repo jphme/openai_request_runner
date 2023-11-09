@@ -57,16 +57,25 @@ results = asyncio.run(
 #or in a notebook:
 #results = await process_api_requests_from_list(...
 
-print(results[0][1]["content"])
+print(results[0]["content"])
 # "Qu'est-ce que 1+1 ?"
 ```
 
 See `examples/classify_languages.py` and `examples/translate.py` for detailed examples of how to use the package for advanced usecases.
 
-
 The package allows for extensive customization. You can set your desired preprocessing function, postprocessing function, and other parameters to suit your specific needs.
 
 Refer to the inline documentation and docstrings in the code for detailed information on each function and its parameters.
+
+### Run inside a notbook
+
+If you want to run openai_request_runner inside a notebook, use `nest_asyncio` like this:
+
+```python
+import nest_asyncio
+nest_asyncio.apply()
+```
+
 
 ### Run Tests
 
