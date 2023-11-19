@@ -99,6 +99,7 @@ class APIRequest:
         error_filepath: str,
         status_tracker: StatusTracker,
         temperature: float = 0,
+        stop: Optional[list[str]] = None,
     ):
         """Calls the OpenAI API and saves results."""
         logging.debug(f"Starting request #{self.task_id}")
@@ -117,6 +118,7 @@ class APIRequest:
             messages=self.messages,
             max_tokens=self.max_tokens,
             stream=False,
+            stop=stop,
         )
         if self.functions is not None:
             params["functions"] = self.functions
@@ -267,6 +269,7 @@ async def process_api_requests_from_list(
     temperature: float = 0,
     debug: Optional[bool] = False,
     openai_client: Optional[AsyncOpenAI] = None,
+    stop: Optional[list[str]] = None,
 ) -> list[Any]:
     """
     Processes a list of API requests in parallel, ensuring that they stay under rate limits.
@@ -530,6 +533,7 @@ async def process_api_requests_from_list(
                         error_filepath=error_filepath,
                         status_tracker=status_tracker,
                         temperature=temperature,
+                        stop=stop,
                     )
                 )
                 results_future_list.append(task)
