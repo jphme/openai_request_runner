@@ -270,6 +270,7 @@ async def process_api_requests_from_list(
     debug: Optional[bool] = False,
     openai_client: Optional[AsyncOpenAI] = None,
     stop: Optional[list[str]] = None,
+    timeout: Optional[float] = 120.0,
 ) -> list[Any]:
     """
     Processes a list of API requests in parallel, ensuring that they stay under rate limits.
@@ -349,7 +350,7 @@ async def process_api_requests_from_list(
                                    Otherwise, returns a list of dictionaries containing the results.
     """
     if openai_client is None:
-        openai_client = AsyncOpenAI()
+        openai_client = AsyncOpenAI(timeout=timeout)
     if save_filepath is None:
         write_to_file = False
     else:
