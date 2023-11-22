@@ -271,6 +271,7 @@ async def process_api_requests_from_list(
     openai_client: Optional[AsyncOpenAI] = None,
     stop: Optional[list[str]] = None,
     timeout: Optional[float] = 120.0,
+    return_errors_as_none: bool = False,
 ) -> list[Any]:
     """
     Processes a list of API requests in parallel, ensuring that they stay under rate limits.
@@ -597,11 +598,11 @@ async def process_api_requests_from_list(
             continue
     return result_list"""
 
-    return [
-        item
-        for item in await asyncio.gather(*results_future_list, return_exceptions=True)
-        if item is not None
-    ]
+    results = await asyncio.gather(*results_future_list, return_exceptions=True)
+    if return_errors_as_none:
+        return results
+    else:
+        return [item for item in results if item is not None]
 
 
 # functions
@@ -705,6 +706,9 @@ def run_openai_requests(
     openai_client: Optional[AsyncOpenAI] = None,
     api_base: Optional[str] = None,
     api_key: Optional[str] = None,
+    stop: Optional[list[str]] = None,
+    timeout: Optional[float] = 120.0,
+    return_errors_as_none: bool = False,
     **kwargs,
 ) -> list[Any]:
     if debug:
@@ -741,6 +745,9 @@ def run_openai_requests(
             temperature=temperature,
             debug=debug,
             openai_client=openai_client,
+            stop=stop,
+            timeout=timeout,
+            return_errors_as_none=return_errors_as_none,
             **kwargs,
         ),
         debug=debug,
