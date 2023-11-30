@@ -189,9 +189,9 @@ class APIRequest:
             status_tracker.num_tasks_succeeded += 1
 
             if not save_filepath:
-                logging.info(f"Request {self.task_id} suceeded.")
+                logging.debug(f"Request {self.task_id} suceeded.")
             else:
-                logging.info(f"Request {self.task_id} saved to {save_filepath}")
+                logging.debug(f"Request {self.task_id} saved to {save_filepath}")
                 append_to_jsonl(response, save_filepath)  # type: ignore
             return response
 
@@ -725,6 +725,8 @@ def run_openai_requests(
     logging.basicConfig(level=logging_level)
     openai_logger = logging.getLogger("openai")
     openai_logger.setLevel(logging.WARNING)
+    httpx_logger = logging.getLogger("httpx")
+    httpx_logger.setLevel(logging.WARNING)
     if openai_client is None:
         openai_client = AsyncOpenAI(base_url=api_base, api_key=api_key)
 
