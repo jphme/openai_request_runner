@@ -183,7 +183,8 @@ class APIRequest:
                 append_to_jsonl(data, error_filepath)
                 status_tracker.num_tasks_in_progress -= 1
                 status_tracker.num_tasks_failed += 1
-            return None
+                return None
+            return "retry"
         else:
             status_tracker.num_tasks_in_progress -= 1
             status_tracker.num_tasks_succeeded += 1
@@ -609,9 +610,9 @@ async def process_api_requests_from_list(
 
     results = await asyncio.gather(*results_future_list, return_exceptions=True)
     if return_errors_as_none:
-        return results
+        return [item for item in results if item != "retry"]
     else:
-        return [item for item in results if item is not None]
+        return [item for item in results if item not in (None, "retry")]
 
 
 # functions
