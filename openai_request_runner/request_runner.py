@@ -271,7 +271,7 @@ async def process_api_requests_from_list(
     finished_ids: Optional[set[int]] = None,
     max_requests_per_minute: Optional[float] = None,
     max_tokens_per_minute: Optional[float] = None,
-    max_attempts: int = 2,
+    max_attempts: int = 3,
     logging_level: int = 20,
     num_max_requests: Optional[int] = None,
     temperature: float = 0,
@@ -384,9 +384,9 @@ async def process_api_requests_from_list(
                     "max_tokens_per_minute"
                 ]
                 break
+        if max_tokens_per_minute is None:
+            max_tokens_per_minute = 150000
         logging.info(f"Max tokens per minute set to {max_tokens_per_minute}")
-    if max_tokens_per_minute is None:
-        max_tokens_per_minute = 150000
 
     # constants
     seconds_to_pause_after_rate_limit_error = 15
@@ -472,7 +472,10 @@ async def process_api_requests_from_list(
                 try:
                     # get new request
                     next_task = next(task_generator)
-                    next_system = next(system_generator)
+                    if system_generator is not None:
+                        next_system = next(system_generator)
+                    else:
+                        next_system = system_prompt
                     if id_field_getter is None:
                         next_task_id = next(task_id_generator)
                     else:
