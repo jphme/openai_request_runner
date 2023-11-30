@@ -7,7 +7,7 @@ from dataclasses import (
     dataclass,
     field,
 )
-from typing import Any, Callable, Iterable, List, Optional, Union
+from typing import Any, Callable, Optional, Sequence, Union
 
 import tiktoken
 from openai import AsyncOpenAI
@@ -86,7 +86,7 @@ class APIRequest:
                 num_tokens += len(encoding.encode(value))
                 if key == "name":  # if there's a name, the role is omitted
                     num_tokens -= 1  # role is always required and always 1 token
-        num_tokens += 2  # every reply is primed with <im_start>assistant
+        num_tokens += 4  # every reply is primed with <im_start>assistant
         # siehe https://github.com/openai/openai-cookbook/blob/4fd2b1a6d29d76dcdb3ae65ac12b1a71253d65b6/examples/api_request_parallel_processor.py#L348 ?
         return num_tokens + self.max_tokens
 
@@ -142,7 +142,6 @@ class APIRequest:
                 append_to_jsonl(tmp_raw_request, raw_request_filepath)
         except Exception as e:  # handling request errors
             logging.warning(f"Request {self.task_id} failed with Exception {e}")
-            status_tracker.num_other_errors += 1
             error = e
             response = None
             if self.debug:
@@ -161,34 +160,42 @@ class APIRequest:
                 logging.warning(
                     f"Error during postprocessing for request {self.task_id}: {e}"
                 )
-                status_tracker.num_other_errors += 1
                 error = e
                 response = None
                 if self.debug:
                     raise e
 
         if error:
-            self.result.append(error)
+            if hasattr(error, "status_code"):
+                if error.status_code == 429:
+                    status_tracker.num_rate_limit_errors += 1
+                    status_tracker.time_of_last_rate_limit_error = time.time()
+                else:
+                    status_tracker.num_api_errors += 1
+            else:
+                status_tracker.num_other_errors += 1
+
             if self.attempts_left:
                 retry_queue.put_nowait(self)
+                return "retry"
             else:
                 logging.error(
                     f"Request {self.task_id} failed after all attempts. Saving errors."
                 )
-                data = (
-                    [self.messages, [str(e) for e in self.result], self.metadata]
-                    if self.metadata
-                    else [self.messages, [str(e) for e in self.result]]
-                )
+                data = {
+                    "error": error,
+                    "request": self.messages,
+                    "metadata": self.metadata,
+                }
+                if hasattr(error, "status_code"):
+                    data["status_code"] = error.status_code
                 append_to_jsonl(data, error_filepath)
                 status_tracker.num_tasks_in_progress -= 1
                 status_tracker.num_tasks_failed += 1
                 return None
-            return "retry"
         else:
             status_tracker.num_tasks_in_progress -= 1
             status_tracker.num_tasks_succeeded += 1
-
             if not save_filepath:
                 logging.debug(f"Request {self.task_id} suceeded.")
             else:
@@ -242,13 +249,13 @@ def get_id_from_finished_default(result: dict) -> Union[int, str]:
 
 
 async def process_api_requests_from_list(
-    inputs: Iterable[dict],
+    inputs: Sequence[dict],
     save_filepath: Optional[str] = None,
     raw_request_filepath: Optional[str] = None,
     error_filepath: str = "tmp_error_log.jsonl",
     token_encoding_name: str = "cl100k_base",
     model: str = "gpt-3.5-turbo-1106",
-    system_prompt: Union[str, List[str]] = "You are a helpful assistant.",
+    system_prompt: Union[str, Sequence[str]] = "You are a helpful assistant.",
     max_tokens: int = 1024,
     id_field_getter: Optional[Callable[[dict], Union[str, int]]] = lambda x: x["id"],
     functions: Optional[list] = None,
@@ -379,12 +386,12 @@ async def process_api_requests_from_list(
                 break
         logging.info(f"Max tokens per minute set to {max_tokens_per_minute}")
     if max_tokens_per_minute is None:
-        max_tokens_per_minute = 10000000
+        max_tokens_per_minute = 150000
 
     # constants
     seconds_to_pause_after_rate_limit_error = 15
     seconds_to_sleep_each_loop = (
-        0.001  # 1 ms limits max throughput to 1,000 requests per second
+        0.002  # 1 ms limits max throughput to 1,000 requests per second
     )
 
     # initialize logging
@@ -406,6 +413,7 @@ async def process_api_requests_from_list(
     available_request_capacity = max_requests_per_minute
     available_token_capacity = max_tokens_per_minute
     last_update_time = time.time()
+    last_status_time = time.time()
 
     if check_finished_ids:
         if save_filepath:
@@ -435,14 +443,14 @@ async def process_api_requests_from_list(
         True  # after max requests reached, we'll stop reading file
     )
     logging.debug("Initialization complete.")
-    if isinstance(system_prompt, List):
+    if isinstance(system_prompt, Sequence):
+        assert len(system_prompt) == len(inputs), (
+            "If system_prompt is a list, it must have the same length as inputs. "
+            f"Got {len(system_prompt)} prompts and {len(inputs)} inputs."
+        )
         system_generator = iter(system_prompt)
     else:
-
-        def system_genhelper():
-            yield system_prompt
-
-        system_generator = system_genhelper()
+        system_generator = None
 
     task_generator = iter(inputs)
     logging.info("Entering main loop")
@@ -578,6 +586,10 @@ async def process_api_requests_from_list(
             logging.warning(
                 f"Pausing to cool down until {time.ctime(status_tracker.time_of_last_rate_limit_error + seconds_to_pause_after_rate_limit_error)}"
             )
+        seconds_since_status_update = time.time() - last_status_time
+        if seconds_since_status_update > 120:
+            logging.info(status_tracker)
+            last_status_time = time.time()
 
     # after finishing, log final status
     if status_tracker.num_tasks_failed > 0:
@@ -618,65 +630,6 @@ async def process_api_requests_from_list(
 # functions
 
 
-def num_tokens_consumed_from_request(
-    request_json: dict,
-    api_endpoint: str,
-    token_encoding_name: str,
-):
-    """Count the number of tokens in the request. Only supports completion and embedding requests."""
-    encoding = tiktoken.get_encoding(token_encoding_name)
-    # if completions request, tokens = prompt + n * max_tokens
-    if api_endpoint.endswith("completions"):
-        max_tokens = request_json.get("max_tokens", 15)
-        n = request_json.get("n", 1)
-        completion_tokens = n * max_tokens
-
-        # chat completions
-        if api_endpoint.startswith("chat/"):
-            num_tokens = 0
-            for message in request_json["messages"]:
-                num_tokens += 4  # every message follows <im_start>{role/name}\n{content}<im_end>\n
-                for key, value in message.items():
-                    num_tokens += len(encoding.encode(value))
-                    if key == "name":  # if there's a name, the role is omitted
-                        num_tokens -= 1  # role is always required and always 1 token
-            num_tokens += 2  # every reply is primed with <im_start>assistant
-            return num_tokens + completion_tokens
-        # normal completions
-        else:
-            prompt = request_json["prompt"]
-            if isinstance(prompt, str):  # single prompt
-                prompt_tokens = len(encoding.encode(prompt))
-                num_tokens = prompt_tokens + completion_tokens
-                return num_tokens
-            elif isinstance(prompt, list):  # multiple prompts
-                prompt_tokens = sum([len(encoding.encode(p)) for p in prompt])
-                num_tokens = prompt_tokens + completion_tokens * len(prompt)
-                return num_tokens
-            else:
-                raise TypeError(
-                    'Expecting either string or list of strings for "prompt" field in completion request'
-                )
-    # if embeddings request, tokens = input tokens
-    elif api_endpoint == "embeddings":
-        input = request_json["input"]
-        if isinstance(input, str):  # single input
-            num_tokens = len(encoding.encode(input))
-            return num_tokens
-        elif isinstance(input, list):  # multiple inputs
-            num_tokens = sum([len(encoding.encode(i)) for i in input])
-            return num_tokens
-        else:
-            raise TypeError(
-                'Expecting either string or list of strings for "inputs" field in embedding request'
-            )
-    # more logic needed to support other API calls (e.g., edits, inserts, DALL-E)
-    else:
-        raise NotImplementedError(
-            f'API endpoint "{api_endpoint}" not implemented in this script'
-        )
-
-
 def task_id_generator_function():
     """Generate integers 0, 1, 2, and so on."""
     task_id = 0
@@ -686,13 +639,13 @@ def task_id_generator_function():
 
 
 def run_openai_requests(
-    inputs: Iterable[dict],
+    inputs: Sequence[dict],
     save_filepath: Optional[str] = None,
     raw_request_filepath: Optional[str] = None,
     error_filepath: str = "tmp_error_log.jsonl",
     token_encoding_name: str = "cl100k_base",
     model: str = "gpt-3.5-turbo-1106",
-    system_prompt: Union[str, List[str]] = "You are a helpful assistant.",
+    system_prompt: Union[str, Sequence[str]] = "You are a helpful assistant.",
     max_tokens: int = 1024,
     id_field_getter: Optional[Callable[[dict], Union[str, int]]] = lambda x: x["id"],
     functions: Optional[list] = None,
@@ -724,10 +677,11 @@ def run_openai_requests(
     if debug:
         logging_level = 10
     logging.basicConfig(level=logging_level)
-    openai_logger = logging.getLogger("openai")
-    openai_logger.setLevel(logging.WARNING)
-    httpx_logger = logging.getLogger("httpx")
-    httpx_logger.setLevel(logging.WARNING)
+    if not debug:
+        openai_logger = logging.getLogger("openai")
+        openai_logger.setLevel(logging.WARNING)
+        httpx_logger = logging.getLogger("httpx")
+        httpx_logger.setLevel(logging.WARNING)
     if openai_client is None:
         openai_client = AsyncOpenAI(base_url=api_base, api_key=api_key)
 
@@ -768,14 +722,15 @@ def run_openai_requests(
 
 # minimal usage example
 if __name__ == "__main__":
-    example_input = [{"id": 0, "prompt": "What is 1+1?"}]
+    example_input = [
+        {"id": 0, "prompt": "What is 1+1?"},
+        {"id": 1, "prompt": "What is 1+1?"},
+    ]
     print(
         run_openai_requests(
             example_input,
-            system_prompt=[
-                "Translate input to French",
-            ],
-        )[0]["content"]
+            system_prompt=["Translate input to French", "Translate input to German"],
+        )  # [0]["content"]
     )
     # "Qu'est-ce que 1+1 ?"
 
