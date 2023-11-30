@@ -7,7 +7,7 @@ from dataclasses import (
     dataclass,
     field,
 )
-from typing import Any, Callable, Iterable, Optional, Union
+from typing import Any, Callable, Iterable, List, Optional, Union
 
 import tiktoken
 from openai import AsyncOpenAI
@@ -247,7 +247,7 @@ async def process_api_requests_from_list(
     error_filepath: str = "tmp_error_log.jsonl",
     token_encoding_name: str = "cl100k_base",
     model: str = "gpt-3.5-turbo-1106",
-    system_prompt: str = "You are a helpful assistant.",
+    system_prompt: Union[str, List[str]] = "You are a helpful assistant.",
     max_tokens: int = 1024,
     id_field_getter: Optional[Callable[[dict], Union[str, int]]] = lambda x: x["id"],
     functions: Optional[list] = None,
@@ -434,6 +434,14 @@ async def process_api_requests_from_list(
         True  # after max requests reached, we'll stop reading file
     )
     logging.debug("Initialization complete.")
+    if isinstance(system_prompt, List):
+        system_generator = iter(system_prompt)
+    else:
+
+        def system_genhelper():
+            yield system_prompt
+
+        system_generator = system_genhelper()
 
     task_generator = iter(inputs)
     logging.info("Entering main loop")
@@ -455,6 +463,7 @@ async def process_api_requests_from_list(
                 try:
                     # get new request
                     next_task = next(task_generator)
+                    next_system = next(system_generator)
                     if id_field_getter is None:
                         next_task_id = next(task_id_generator)
                     else:
@@ -467,7 +476,7 @@ async def process_api_requests_from_list(
                     metadata = next_task.pop("metadata", {})
                     metadata["token_encoding_name"] = token_encoding_name
                     metadata["model"] = model
-                    metadata["system_msg"] = system_prompt
+                    metadata["system_msg"] = next_system
                     metadata["max_tokens"] = max_tokens
                     metadata["functions"] = functions
                     metadata["function_call"] = function_call
@@ -682,7 +691,7 @@ def run_openai_requests(
     error_filepath: str = "tmp_error_log.jsonl",
     token_encoding_name: str = "cl100k_base",
     model: str = "gpt-3.5-turbo-1106",
-    system_prompt: str = "You are a helpful assistant.",
+    system_prompt: Union[str, List[str]] = "You are a helpful assistant.",
     max_tokens: int = 1024,
     id_field_getter: Optional[Callable[[dict], Union[str, int]]] = lambda x: x["id"],
     functions: Optional[list] = None,
@@ -758,9 +767,12 @@ def run_openai_requests(
 if __name__ == "__main__":
     example_input = [{"id": 0, "prompt": "What is 1+1?"}]
     print(
-        run_openai_requests(example_input, system_prompt="Translate input to French")[
-            0
-        ]["content"]
+        run_openai_requests(
+            example_input,
+            system_prompt=[
+                "Translate input to French",
+            ],
+        )[0]["content"]
     )
     # "Qu'est-ce que 1+1 ?"
 
