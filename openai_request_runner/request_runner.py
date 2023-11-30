@@ -732,6 +732,7 @@ if __name__ == "__main__":
     print(
         run_openai_requests(
             example_input,
+            # system_prompt="Translate input to French",
             system_prompt=["Translate input to French", "Translate input to German"],
         )  # [0]["content"]
     )
