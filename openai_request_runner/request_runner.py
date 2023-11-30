@@ -443,10 +443,10 @@ async def process_api_requests_from_list(
         True  # after max requests reached, we'll stop reading file
     )
     logging.debug("Initialization complete.")
-    if isinstance(system_prompt, Sequence):
+    if isinstance(system_prompt, Sequence) and not isinstance(system_prompt, str):
         assert len(system_prompt) == len(inputs), (
             "If system_prompt is a list, it must have the same length as inputs. "
-            f"Got {len(system_prompt)} prompts and {len(inputs)} inputs."
+            f"Got {len(system_prompt)} system prompts and {len(inputs)} inputs."
         )
         system_generator = iter(system_prompt)
     else:
