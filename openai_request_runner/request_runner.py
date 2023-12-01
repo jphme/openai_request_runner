@@ -183,7 +183,7 @@ class APIRequest:
                     f"Request {self.task_id} failed after all attempts. Saving errors."
                 )
                 data = {
-                    "error": error,
+                    "error": str(error),
                     "request": self.messages,
                     "metadata": self.metadata,
                 }
