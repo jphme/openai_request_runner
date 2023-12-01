@@ -179,7 +179,7 @@ class APIRequest:
                 retry_queue.put_nowait(self)
                 return "retry"
             else:
-                logging.error(
+                logging.warning(
                     f"Request {self.task_id} failed after all attempts. Saving errors."
                 )
                 data = {
