@@ -177,7 +177,7 @@ class APIRequest:
 
             if self.attempts_left:
                 retry_queue.put_nowait(self)
-                return "retry"
+                return self.task_id, "retry"
             else:
                 logging.warning(
                     f"Request {self.task_id} failed after all attempts. Saving errors."
@@ -192,7 +192,7 @@ class APIRequest:
                 append_to_jsonl(data, error_filepath)
                 status_tracker.num_tasks_in_progress -= 1
                 status_tracker.num_tasks_failed += 1
-                return None
+                return self.task_id, None
         else:
             status_tracker.num_tasks_in_progress -= 1
             status_tracker.num_tasks_succeeded += 1
@@ -201,7 +201,7 @@ class APIRequest:
             else:
                 logging.debug(f"Request {self.task_id} saved to {save_filepath}")
                 append_to_jsonl(response, save_filepath)  # type: ignore
-            return response
+            return self.task_id, response
 
 
 def preprocess_messages(request_json: dict, metadata: dict) -> list[dict]:
@@ -400,6 +400,7 @@ async def process_api_requests_from_list(
 
     # initialize trackers
     results_future_list = []
+    task_id_order = []
     queue_of_requests_to_retry = asyncio.Queue()
     task_id_generator = (
         task_id_generator_function()
@@ -480,6 +481,7 @@ async def process_api_requests_from_list(
                         next_task_id = next(task_id_generator)
                     else:
                         next_task_id = id_field_getter(next_task)
+                    task_id_order.append(next_task_id)
                     if next_task_id in finished_tasks:
                         logging.debug(
                             f"Skipping request {next_task_id} because it is already finished"
@@ -625,9 +627,18 @@ async def process_api_requests_from_list(
 
     results = await asyncio.gather(*results_future_list, return_exceptions=True)
     if return_errors_as_none:
-        return [item for item in results if item != "retry"]
+        ergs_dict = {task_id: item for task_id, item in results if item != "retry"}
     else:
-        return [item for item in results if item not in (None, "retry")]
+        ergs_dict = {
+            task_id: item for task_id, item in results if item not in (None, "retry")
+        }
+    ergs = []
+    for task_id in task_id_order:
+        if task_id in ergs_dict:
+            ergs.append(ergs_dict[task_id])
+        else:
+            ergs.append(None)
+    return ergs
 
 
 # functions
