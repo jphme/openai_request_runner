@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "openai_request_runner"
-version = "0.1.4"
+version = "0.1.5"
 description = "Slim Runner for batched OpenAI Requests"
 authors = [
     "Jan Philipp Harries",
@@ -20,7 +20,7 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.9, <4.0"
-openai = "^1.0.0"
+openai = "^1.3.6"
 tiktoken = "^0.3.3"
 pydantic = "^2.0.2"
 requests = "^2.26.0"
