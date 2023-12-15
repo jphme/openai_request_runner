@@ -1,5 +1,6 @@
 # inspired by https://github.com/openai/openai-cookbook/blob/main/examples/api_request_parallel_processor.py
 import asyncio
+import copy
 import json  # for saving results to a jsonl file
 import logging  # for logging rate limit warnings and other messages
 import time  # for sleeping after rate limit is hit
@@ -464,7 +465,8 @@ async def process_api_requests_from_list(
         # get next request (if one is not already waiting for capacity)
         if next_request is None:
             if not queue_of_requests_to_retry.empty():
-                next_request = queue_of_requests_to_retry.get_nowait()
+                # experimental copy request
+                next_request = copy.deepcopy(queue_of_requests_to_retry.get_nowait())
                 logging.info(f"Retrying request {next_request.task_id}")
             elif (
                 file_not_finished
@@ -629,7 +631,8 @@ async def process_api_requests_from_list(
             continue
     return result_list"""
 
-    results = await asyncio.gather(*results_future_list, return_exceptions=True)
+    # false vs true
+    results = await asyncio.gather(*results_future_list, return_exceptions=False)
     if return_errors_as_none:
         ergs_dict = {task_id: item for task_id, item in results if item != "retry"}
     else:
@@ -701,7 +704,9 @@ def run_openai_requests(
         httpx_logger = logging.getLogger("httpx")
         httpx_logger.setLevel(logging.WARNING)
     if openai_client is None:
-        openai_client = AsyncOpenAI(base_url=api_base, api_key=api_key)
+        openai_client = AsyncOpenAI(
+            timeout=httpx.Timeout(timeout, connect=10.0), max_retries=0
+        )
 
     return asyncio.run(
         process_api_requests_from_list(
