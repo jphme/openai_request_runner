@@ -9,6 +9,7 @@ from dataclasses import (
 )
 from typing import Any, Callable, Optional, Sequence, Union
 
+import httpx
 import tiktoken
 from openai import AsyncOpenAI
 from openai.types.chat.chat_completion import ChatCompletion
@@ -278,7 +279,7 @@ async def process_api_requests_from_list(
     debug: Optional[bool] = False,
     openai_client: Optional[AsyncOpenAI] = None,
     stop: Optional[list[str]] = None,
-    timeout: Optional[float] = 120.0,
+    timeout: Optional[float] = 60.0,
     return_errors_as_none: bool = False,
 ) -> list[Any]:
     """
@@ -359,7 +360,10 @@ async def process_api_requests_from_list(
                                    Otherwise, returns a list of dictionaries containing the results.
     """
     if openai_client is None:
-        openai_client = AsyncOpenAI(timeout=timeout)
+        # retries are handled here
+        openai_client = AsyncOpenAI(
+            timeout=httpx.Timeout(timeout, connect=10.0), max_retries=0
+        )
     if save_filepath is None:
         write_to_file = False
     else:
