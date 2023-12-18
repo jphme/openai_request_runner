@@ -703,6 +703,8 @@ def run_openai_requests(
     if debug:
         logging_level = 10
     logging.basicConfig(level=logging_level)
+    httpcore_logger = logging.getLogger("httpcore")
+    httpcore_logger.setLevel(logging.WARNING)
     if not debug:
         openai_logger = logging.getLogger("openai")
         openai_logger.setLevel(logging.WARNING)
