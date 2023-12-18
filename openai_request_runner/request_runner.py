@@ -120,8 +120,9 @@ class APIRequest:
             messages=self.messages,
             max_tokens=self.max_tokens,
             stream=False,
-            stop=stop,
         )
+        if stop is not None:
+            params["stop"] = stop
         if self.functions is not None:
             params["functions"] = self.functions
             params["function_call"] = self.function_call  # type: ignore
