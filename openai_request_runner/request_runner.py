@@ -2,7 +2,7 @@
 import asyncio
 import copy
 import json  # for saving results to a jsonl file
-import logging  # for logging rate limit warnings and other messages
+import logging
 import time  # for sleeping after rate limit is hit
 from dataclasses import (
     dataclass,
@@ -102,6 +102,7 @@ class APIRequest:
         status_tracker: StatusTracker,
         temperature: float = 0,
         stop: Optional[list[str]] = None,
+        timeout: float = 60.0,
     ):
         """Calls the OpenAI API and saves results."""
         logging.debug(f"Starting request #{self.task_id}")
@@ -132,7 +133,12 @@ class APIRequest:
         try:
             if self.debug:
                 logging.debug(f"Request params: {params}")
-            response = await openai_client.chat.completions.create(**params)
+            response = await asyncio.wait_for(
+                openai_client.chat.completions.create(
+                    timeout=httpx.Timeout(timeout, connect=10.0), **params
+                ),
+                timeout=timeout,
+            )
             assert isinstance(response, ChatCompletion)
             status_tracker.num_prompt_tokens_used += response.usage.prompt_tokens
             status_tracker.num_completion_tokens_used += (
@@ -566,6 +572,7 @@ async def process_api_requests_from_list(
                         status_tracker=status_tracker,
                         temperature=temperature,
                         stop=stop,
+                        timeout=timeout,
                     )
                 )
                 results_future_list.append(task)
@@ -633,7 +640,7 @@ async def process_api_requests_from_list(
     return result_list"""
 
     # false vs true
-    results = await asyncio.gather(*results_future_list, return_exceptions=False)
+    results = await asyncio.gather(*results_future_list, return_exceptions=True)
     if return_errors_as_none:
         ergs_dict = {task_id: item for task_id, item in results if item != "retry"}
     else:
@@ -706,7 +713,10 @@ def run_openai_requests(
         httpx_logger.setLevel(logging.WARNING)
     if openai_client is None:
         openai_client = AsyncOpenAI(
-            timeout=httpx.Timeout(timeout, connect=10.0), max_retries=0
+            timeout=httpx.Timeout(timeout, connect=10.0),
+            max_retries=0,
+            api_key=api_key,
+            base_url=api_base,
         )
 
     return asyncio.run(
