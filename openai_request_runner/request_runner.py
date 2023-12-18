@@ -155,7 +155,6 @@ class APIRequest:
             response = None
             if self.debug:
                 logging.warning(params)
-                raise e
 
         if response is not None:
             if self.debug:
@@ -171,8 +170,6 @@ class APIRequest:
                 )
                 error = e
                 response = None
-                if self.debug:
-                    raise e
 
         if error:
             if hasattr(error, "status_code"):
